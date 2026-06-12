@@ -91,8 +91,16 @@ function routerHandler(call) {
     };
   }
   if (url === '/api/v4/catalogs' && method === 'POST') {
-    fakeCatalog = { id: ++nextId, fieldId: null, elements: [] };
+    const body = JSON.parse(call.data)[0];
+    fakeCatalog = { id: ++nextId, fieldId: null, elements: [], canAddElements: body.can_add_elements !== false };
     return { ok: true, data: { _embedded: { catalogs: [{ id: fakeCatalog.id }] } } };
+  }
+  if (url === '/api/v4/catalogs' && method === 'PATCH') {
+    const body = JSON.parse(call.data)[0];
+    if (fakeCatalog && fakeCatalog.id === body.id && typeof body.can_add_elements === 'boolean') {
+      fakeCatalog.canAddElements = body.can_add_elements;
+    }
+    return { ok: true, data: {} };
   }
   if (fakeCatalog && url === '/api/v4/catalogs/' + fakeCatalog.id + '/custom_fields') {
     if (method === 'GET') {
@@ -128,6 +136,9 @@ function routerHandler(call) {
       };
     }
     if (method === 'POST') {
+      if (fakeCatalog.canAddElements === false) {
+        return { ok: false }; // амо запрещает добавление элементов в такой список
+      }
       const body = JSON.parse(call.data)[0];
       const el = { id: ++nextId, value: body.custom_fields_values[0].values[0].value };
       fakeCatalog.elements.push(el);
@@ -533,6 +544,29 @@ section('Чтение из служебного списка после пере
   assert(picker.$body.find('.yp-tt-picker__card').length === 1 &&
     picker.$body.find('.yp-tt-picker__card-name').text() === 'Постоянный',
     'после «перезагрузки» шаблоны прочитаны из служебного списка');
+}
+
+/* 9в. Авторемонт списка, созданного с запретом на добавление элементов */
+section('Ремонт списка с can_add_elements:false');
+{
+  resetEnv();
+  // эмулируем список, созданный ранней версией виджета: писать в него нельзя
+  fakeCatalog = { id: ++nextId, fieldId: ++nextId, elements: [], canAddElements: false };
+  const widget = makeWidget([]);
+  widget.callbacks.render();
+  widget.callbacks.bind_actions();
+  $('#card-zone .yp-tt__editor-open').trigger('click');
+  lastModal().$body.find('.yp-tt-list__add').trigger('click');
+  const form = lastModal();
+  form.$body.find('[name="tpl_name"]').val('После ремонта');
+  form.$body.find('.yp-tt-form__save').trigger('click');
+  assert(ajaxCalls.some((call) => call.url === '/api/v4/catalogs' && (call.method || '').toUpperCase() === 'PATCH'),
+    'виджет починил список через PATCH (can_add_elements:true)');
+  assert(fakeCatalog.canAddElements === true, 'флаг can_add_elements включён');
+  const saved = savedCatalogTemplates();
+  assert(saved && saved.length === 1 && saved[0].name === 'После ремонта',
+    'после ремонта шаблон записан со второй попытки');
+  assert($('.yp-tt-toast').length === 0, 'ошибка пользователю не показывалась — ремонт прозрачный');
 }
 
 /* 10. Покрытие ключей локализации */

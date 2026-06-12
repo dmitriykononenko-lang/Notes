@@ -359,7 +359,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         var catalogs = (response && response._embedded && response._embedded.catalogs) || [];
         var found = null;
         catalogs.forEach(function (catalog) {
-          if (catalog && catalog.name === STORAGE_CATALOG_NAME) {
+          if (!found && catalog && catalog.name === STORAGE_CATALOG_NAME) {
             found = catalog;
           }
         });
@@ -404,7 +404,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         url: '/api/v4/catalogs',
         method: 'POST',
         contentType: 'application/json',
-        data: JSON.stringify([{ name: STORAGE_CATALOG_NAME, type: 'regular', can_add_elements: false }]),
+        data: JSON.stringify([{ name: STORAGE_CATALOG_NAME, type: 'regular', can_add_elements: true }]),
         dataType: 'json'
       }).done(function (response) {
         var created = response && response._embedded && response._embedded.catalogs &&
@@ -483,11 +483,28 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       });
     }
 
+    // Разрешаем добавление элементов в уже созданный список
+    // (ремонт списков, созданных ранними версиями виджета с can_add_elements:false)
+    function repairStorageCatalog(callback) {
+      $.ajax({
+        url: '/api/v4/catalogs',
+        method: 'PATCH',
+        contentType: 'application/json',
+        data: JSON.stringify([{ id: storage.catalogId, can_add_elements: true }]),
+        dataType: 'json'
+      }).done(function () {
+        callback(true);
+      }).fail(function (xhr) {
+        logStorageError('ремонт списка', xhr);
+        callback(false);
+      });
+    }
+
     // Сохранение шаблонов в служебный список
     function saveTemplates(templates, done) {
       var json = JSON.stringify(templates);
 
-      function writeElement() {
+      function writeElement(isRetry) {
         var values = [{ field_id: storage.fieldId, values: [{ value: json }] }];
         var isUpdate = !!storage.elementId;
         var payload = isUpdate
@@ -511,21 +528,32 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
           done(true);
         }).fail(function (xhr) {
           logStorageError('запись элемента', xhr);
-          done(false, 'http_' + (xhr && xhr.status));
+          if (!isRetry) {
+            // вероятно, списку запрещено добавление элементов — чиним и повторяем
+            repairStorageCatalog(function (repaired) {
+              if (repaired) {
+                writeElement(true);
+              } else {
+                done(false, 'запись элемента, HTTP ' + (xhr && xhr.status));
+              }
+            });
+            return;
+          }
+          done(false, 'запись элемента, HTTP ' + (xhr && xhr.status));
         });
       }
 
       findStorage(function (found) {
         if (found) {
-          writeElement();
+          writeElement(false);
           return;
         }
         createStorage(function (created) {
           if (!created) {
-            done(false, 'storage');
+            done(false, 'создание списка');
             return;
           }
-          writeElement();
+          writeElement(false);
         });
       });
     }
@@ -534,8 +562,8 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       saveTemplates(templates, function (ok, errInfo) {
         if (!ok) {
           var message = t('editor.save_failed', 'Не удалось сохранить шаблоны. Изменить их можно в настройках виджета.');
-          if (errInfo && errInfo !== 'storage') {
-            message += ' [' + errInfo.replace('http_', 'HTTP ') + ']';
+          if (errInfo) {
+            message += ' (' + errInfo + ')';
           }
           showToast(message, true);
         }
@@ -557,7 +585,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         '.yp-tt__editor-open{display:inline-block;margin-top:8px;font-size:12px;color:#92989b;cursor:pointer;border-bottom:1px dashed #c4c8cb}',
         '.yp-tt__editor-open:hover{color:#313942}',
         /* всплывающее уведомление */
-        '.yp-tt-toast{position:fixed;right:20px;bottom:20px;z-index:999999;background:#313942;color:#fff;padding:10px 16px;border-radius:4px;font-size:13px;opacity:0;transform:translateY(8px);transition:opacity .25s,transform .25s}',
+        '.yp-tt-toast{position:fixed;left:20px;bottom:20px;max-width:480px;z-index:999999;background:#313942;color:#fff;padding:10px 16px;border-radius:4px;font-size:13px;line-height:18px;opacity:0;transform:translateY(8px);transition:opacity .25s,transform .25s}',
         '.yp-tt-toast_visible{opacity:1;transform:translateY(0)}',
         '.yp-tt-toast_error{background:#e05c5c}',
         /* общее для модальных окон */
