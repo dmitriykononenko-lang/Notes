@@ -1,0 +1,48 @@
+{
+  "widget": {
+    "name": "Task Templates",
+    "short_description": "Create tasks in one click from predefined templates",
+    "description": "The widget lets you create task templates with predefined parameters: text, task type, deadline and assignee. Tasks are created in one click from a lead, contact or company card."
+  },
+  "settings": {
+    "templates": "Task templates (JSON)"
+  },
+  "card": {
+    "empty": "No templates configured yet. Open the widget settings and add templates.",
+    "created": "Task created",
+    "create_failed": "Failed to create the task",
+    "no_entity": "Could not detect the current card"
+  },
+  "editor": {
+    "hint": "A template defines the task text, type, deadline and assignee. A task is created in one click from a lead, contact or company card.",
+    "add": "+ Add template",
+    "edit": "Edit",
+    "delete": "Delete",
+    "empty": "No templates yet.",
+    "deadline_now": "immediately",
+    "validation": "Fill in the template name and task text",
+    "form": {
+      "name": "Template name",
+      "text": "Task text",
+      "type": "Task type",
+      "deadline": "Deadline",
+      "deadline_in": "in",
+      "end_of_day": "move to the end of the day",
+      "responsible": "Assignee",
+      "responsible_current": "Current user",
+      "responsible_entity": "Card owner",
+      "responsible_users": "Users",
+      "save": "Save template",
+      "cancel": "Cancel"
+    },
+    "units": {
+      "minutes": "minutes",
+      "hours": "hours",
+      "days": "days"
+    },
+    "default_types": {
+      "call": "Call",
+      "meeting": "Meeting"
+    }
+  }
+}
