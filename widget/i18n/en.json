@@ -2,47 +2,63 @@
   "widget": {
     "name": "Task Templates",
     "short_description": "Create tasks in one click from predefined templates",
-    "description": "The widget lets you create task templates with predefined parameters: text, task type, deadline and assignee. Tasks are created in one click from a lead, contact or company card."
+    "description": "The widget lets you create task templates with predefined parameters: comment, task type, deadline and assignee. Tasks are created in one click from a lead, contact or company card."
   },
   "settings": {
     "templates": "Task templates (JSON)"
   },
   "card": {
-    "empty": "No templates configured yet. Open the widget settings and add templates.",
+    "open": "Create task from template",
+    "editor": "Template editor",
     "created": "Task created",
     "create_failed": "Failed to create the task",
     "no_entity": "Could not detect the current card"
   },
+  "picker": {
+    "title": "Choose a template to create a task:",
+    "empty": "No templates configured yet. Add them in the template editor.",
+    "till": "Till",
+    "for": "for",
+    "entity_responsible": "the card owner",
+    "manual_date": "Date is picked manually",
+    "create": "Create task"
+  },
   "editor": {
-    "hint": "A template defines the task text, type, deadline and assignee. A task is created in one click from a lead, contact or company card.",
-    "add": "+ Add template",
-    "edit": "Edit",
+    "title": "Template editor",
+    "new": "+ new template",
     "delete": "Delete",
     "empty": "No templates yet.",
-    "deadline_now": "immediately",
-    "validation": "Fill in the template name and task text",
-    "form": {
-      "name": "Template name",
-      "text": "Task text",
-      "type": "Task type",
-      "deadline": "Deadline",
-      "deadline_in": "in",
-      "end_of_day": "move to the end of the day",
-      "responsible": "Assignee",
-      "responsible_current": "Current user",
-      "responsible_entity": "Card owner",
-      "responsible_users": "Users",
-      "save": "Save template",
-      "cancel": "Cancel"
-    },
-    "units": {
-      "minutes": "minutes",
-      "hours": "hours",
-      "days": "days"
-    },
+    "hint": "A template defines the task comment, type, deadline and assignee. A task is created in one click from a lead, contact or company card. Click a template name to edit it.",
+    "saved": "Templates saved",
+    "save_failed": "Failed to save templates. You can edit them in the widget settings.",
     "default_types": {
       "call": "Call",
       "meeting": "Meeting"
     }
+  },
+  "form": {
+    "title_new": "Create template",
+    "title_edit": "Edit template",
+    "name_placeholder": "Template name",
+    "deadline_prefix": "Deadline:",
+    "manual_date": "Pick the date manually",
+    "responsible": "Assignee",
+    "responsible_current": "Current user",
+    "responsible_entity": "Card owner",
+    "comment_placeholder": "Add a comment",
+    "save": "Save",
+    "cancel": "Cancel",
+    "validation": "Enter the template name"
+  },
+  "deadlines": {
+    "now": "at the moment of creation",
+    "min15": "in 15 minutes",
+    "min30": "in 30 minutes",
+    "hour1": "in an hour",
+    "today_end": "by the end of the day",
+    "tomorrow": "tomorrow",
+    "days2": "in 2 days",
+    "days3": "in 3 days",
+    "week": "in a week"
   }
 }

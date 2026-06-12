@@ -1,15 +1,24 @@
 /**
  * Виджет «Шаблоны задач» для amoCRM.
  *
- * Позволяет завести набор шаблонов задач (текст, тип, срок выполнения,
+ * Позволяет завести набор шаблонов задач (комментарий, тип, срок выполнения,
  * ответственный) и ставить задачи в один клик из карточки сделки,
  * контакта или компании.
  *
- * Шаблоны хранятся в настройках виджета в виде JSON-строки (поле `templates`),
- * поэтому виджету не нужен собственный бэкенд. Редактор шаблонов встроен
- * в окно настроек виджета.
+ * UX повторяет виджет-пример YouPlatform:
+ *  - в карточке кнопка открывает модальное окно «Выберите шаблон для
+ *    постановки задачи» с карточками шаблонов (вычисленный срок,
+ *    ответственный, тип — комментарий);
+ *  - «Редактор шаблонов» — модальное окно со списком шаблонов и формой
+ *    «Создать шаблон» (срок-пресет, выбор даты вручную, ответственный,
+ *    тип задачи, комментарий).
+ *
+ * Шаблоны хранятся в настройках виджета JSON-строкой (поле `templates`).
+ * Сохранение из редактора в карточке идёт через POST /api/v4/widgets/{code};
+ * резервный путь — редактирование в настройках виджета (поле синхронизируется
+ * со стандартной кнопкой «Сохранить»).
  */
-define(['jquery'], function ($) {
+define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
   var CustomWidget = function () {
     var self = this;
 
@@ -21,6 +30,23 @@ define(['jquery'], function ($) {
       { prefix: 'ccard', entity: 'contacts' },
       { prefix: 'comcard', entity: 'companies' }
     ];
+
+    // Пресеты срока выполнения: ключ -> смещение от момента постановки
+    var DEADLINE_PRESETS = [
+      { key: 'now', ms: 0 },
+      { key: 'min15', ms: 15 * 60000 },
+      { key: 'min30', ms: 30 * 60000 },
+      { key: 'hour1', ms: 3600000 },
+      { key: 'today_end', endOfDay: true },
+      { key: 'tomorrow', ms: 86400000 },
+      { key: 'days2', ms: 2 * 86400000 },
+      { key: 'days3', ms: 3 * 86400000 },
+      { key: 'week', ms: 7 * 86400000 }
+    ];
+
+    // Кэш шаблонов после сохранения через API (настройки обновятся
+    // только после перезагрузки страницы)
+    var templatesCache = null;
 
     /* ------------------------------ локализация ------------------------------ */
 
@@ -48,8 +74,10 @@ define(['jquery'], function ($) {
         .replace(/'/g, '&#39;');
     }
 
-    // Шаблоны из сохранённых настроек виджета
     function getTemplates() {
+      if (templatesCache !== null) {
+        return templatesCache;
+      }
       var settings = self.get_settings() || {};
       if (!settings.templates) {
         return [];
@@ -62,7 +90,6 @@ define(['jquery'], function ($) {
       }
     }
 
-    // Типы задач аккаунта (звонок, встреча и пользовательские типы)
     function getTaskTypes() {
       var list = [];
       try {
@@ -92,7 +119,16 @@ define(['jquery'], function ($) {
       return list;
     }
 
-    // Активные пользователи аккаунта
+    function getTaskTypeName(id) {
+      var name = '';
+      getTaskTypes().forEach(function (type) {
+        if (String(type.id) === String(id)) {
+          name = type.name;
+        }
+      });
+      return name;
+    }
+
     function getManagers() {
       var list = [];
       try {
@@ -111,12 +147,18 @@ define(['jquery'], function ($) {
       return list;
     }
 
-    function getCurrentUserId() {
+    function getCurrentUser() {
       try {
-        return parseInt((AMOCRM.constant('user') || {}).id, 10) || null;
+        var user = AMOCRM.constant('user') || {};
+        return { id: parseInt(user.id, 10) || null, name: user.name || '' };
       } catch (e) {
-        return null;
+        return { id: null, name: '' };
       }
+    }
+
+    function getWidgetCode() {
+      var params = self.params || {};
+      return params.widget_code || params.code || null;
     }
 
     // Определяем сущность и id открытой карточки
@@ -152,39 +194,77 @@ define(['jquery'], function ($) {
       return entity && id ? { type: entity, id: id } : null;
     }
 
-    /* ------------------------------ срок и ответственный ------------------------------ */
+    /* ------------------------------ срок выполнения ------------------------------ */
 
-    function computeCompleteTill(deadline) {
-      deadline = deadline || {};
-      var amount = parseInt(deadline.amount, 10);
-      if (isNaN(amount) || amount < 0) {
-        amount = 0;
+    function pad(n) {
+      return (n < 10 ? '0' : '') + n;
+    }
+
+    function formatTs(ts) {
+      var date = new Date(ts * 1000);
+      return pad(date.getDate()) + '.' + pad(date.getMonth() + 1) + '.' + date.getFullYear() +
+        ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    }
+
+    function deadlinePresetLabel(key) {
+      return t('deadlines.' + key, key);
+    }
+
+    function computeCompleteTill(template) {
+      var deadline = template.deadline;
+
+      // Совместимость со старым форматом {amount, unit, endOfDay}
+      if (deadline && typeof deadline === 'object') {
+        var amount = parseInt(deadline.amount, 10);
+        if (isNaN(amount) || amount < 0) {
+          amount = 0;
+        }
+        var unitMs = { minutes: 60000, hours: 3600000, days: 86400000 }[deadline.unit] || 86400000;
+        var legacy = new Date(Date.now() + amount * unitMs);
+        if (deadline.endOfDay) {
+          legacy.setHours(23, 59, 0, 0);
+        }
+        return Math.floor(legacy.getTime() / 1000);
       }
-      var unitMs = { minutes: 60000, hours: 3600000, days: 86400000 }[deadline.unit] || 86400000;
-      var date = new Date(Date.now() + amount * unitMs);
-      if (deadline.endOfDay) {
+
+      var preset = null;
+      DEADLINE_PRESETS.forEach(function (item) {
+        if (item.key === deadline) {
+          preset = item;
+        }
+      });
+      if (!preset) {
+        preset = DEADLINE_PRESETS[0];
+      }
+      var date = new Date(Date.now() + (preset.ms || 0));
+      if (preset.endOfDay) {
         date.setHours(23, 59, 0, 0);
       }
       return Math.floor(date.getTime() / 1000);
     }
 
-    function deadlineLabel(deadline) {
-      deadline = deadline || {};
-      var amount = parseInt(deadline.amount, 10) || 0;
-      var parts = [];
-      if (amount > 0) {
-        parts.push(t('editor.form.deadline_in', 'через') + ' ' + amount + ' ' + t('editor.units.' + deadline.unit, deadline.unit || ''));
-      } else {
-        parts.push(t('editor.deadline_now', 'сразу'));
+    /* ------------------------------ ответственный ------------------------------ */
+
+    function responsibleName(template) {
+      if (template.responsible === 'entity') {
+        return t('picker.entity_responsible', 'ответственного за карточку');
       }
-      if (deadline.endOfDay) {
-        parts.push(t('editor.form.end_of_day', 'перенести на конец дня'));
+      if (template.responsible && template.responsible !== 'current') {
+        var name = '';
+        getManagers().forEach(function (manager) {
+          if (String(manager.id) === String(template.responsible)) {
+            name = manager.name;
+          }
+        });
+        if (name) {
+          return name;
+        }
       }
-      return parts.join(', ');
+      return getCurrentUser().name || t('form.responsible_current', 'Текущий пользователь');
     }
 
     function resolveResponsibleId(template, entity, callback) {
-      var fallback = getCurrentUserId();
+      var fallback = getCurrentUser().id;
       if (template.responsible === 'entity') {
         // Ответственный за карточку — берём из API, это надёжнее данных интерфейса
         $.ajax({
@@ -210,18 +290,18 @@ define(['jquery'], function ($) {
 
     /* ------------------------------ создание задачи ------------------------------ */
 
-    function createTaskFromTemplate(template, done) {
+    function createTaskFromTemplate(template, completeTillOverride, done) {
       var entity = detectEntity();
       if (!entity) {
         showToast(t('card.no_entity', 'Не удалось определить карточку'), true);
-        done();
+        done(false);
         return;
       }
       resolveResponsibleId(template, entity, function (responsibleId) {
         var task = {
           text: template.text || template.name || '',
           task_type_id: parseInt(template.task_type_id, 10) || 1,
-          complete_till: computeCompleteTill(template.deadline),
+          complete_till: completeTillOverride || computeCompleteTill(template),
           entity_id: entity.id,
           entity_type: entity.type
         };
@@ -236,60 +316,112 @@ define(['jquery'], function ($) {
           dataType: 'json'
         }).done(function () {
           showToast(t('card.created', 'Задача создана'), false);
-          done();
+          done(true);
         }).fail(function () {
           showToast(t('card.create_failed', 'Не удалось создать задачу'), true);
-          done();
+          done(false);
         });
       });
     }
 
-    /* --------------------------------- интерфейс --------------------------------- */
+    /* ------------------------------ сохранение шаблонов ------------------------------ */
+
+    // Сохранение настроек виджета через API v4 (доступно администраторам)
+    function persistViaApi(templates, done) {
+      var code = getWidgetCode();
+      if (!code) {
+        done(false);
+        return;
+      }
+      $.ajax({
+        url: '/api/v4/widgets/' + code,
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ settings: { templates: JSON.stringify(templates) } }),
+        dataType: 'json'
+      }).done(function () {
+        templatesCache = templates;
+        done(true);
+      }).fail(function () {
+        done(false);
+      });
+    }
+
+    function cardPersist(templates, done) {
+      persistViaApi(templates, function (ok) {
+        if (!ok) {
+          showToast(t('editor.save_failed', 'Не удалось сохранить шаблоны. Изменить их можно в настройках виджета.'), true);
+        }
+        done(ok);
+      });
+    }
+
+    /* --------------------------------- стили --------------------------------- */
 
     function injectStyles() {
       if (document.getElementById(STYLE_ID)) {
         return;
       }
       var css = [
+        /* блок в карточке */
         '.yp-tt{padding:4px 0}',
-        '.yp-tt__empty{color:#92989b;font-size:13px;line-height:17px}',
-        '.yp-tt__item{padding:7px 10px;margin-bottom:6px;border:1px solid #e2e4e7;border-radius:4px;cursor:pointer;background:#fff;transition:background .15s,border-color .15s}',
-        '.yp-tt__item:hover{background:#f5f6f7;border-color:#c9ccd0}',
-        '.yp-tt__item_busy{opacity:.5;pointer-events:none}',
-        '.yp-tt__item-name{font-size:13px;font-weight:bold;color:#313942}',
-        '.yp-tt__item-meta{font-size:12px;color:#92989b;margin-top:2px}',
-        '.yp-tt-toast{position:fixed;right:20px;bottom:20px;z-index:99999;background:#313942;color:#fff;padding:10px 16px;border-radius:4px;font-size:13px;opacity:0;transform:translateY(8px);transition:opacity .25s,transform .25s}',
+        '.yp-tt__open{display:block;width:100%;box-sizing:border-box;padding:8px 10px;border:none;border-radius:3px;background:#4c8bf7;color:#fff;font-size:13px;cursor:pointer;text-align:center}',
+        '.yp-tt__open:hover{background:#3f7be0}',
+        '.yp-tt__editor-open{display:inline-block;margin-top:8px;font-size:12px;color:#92989b;cursor:pointer;border-bottom:1px dashed #c4c8cb}',
+        '.yp-tt__editor-open:hover{color:#313942}',
+        /* всплывающее уведомление */
+        '.yp-tt-toast{position:fixed;right:20px;bottom:20px;z-index:999999;background:#313942;color:#fff;padding:10px 16px;border-radius:4px;font-size:13px;opacity:0;transform:translateY(8px);transition:opacity .25s,transform .25s}',
         '.yp-tt-toast_visible{opacity:1;transform:translateY(0)}',
         '.yp-tt-toast_error{background:#e05c5c}',
-        '.yp-tt-editor{margin:0 0 15px}',
-        '.yp-tt-editor__hint{font-size:13px;color:#92989b;margin-bottom:12px;line-height:17px}',
-        '.yp-tt-editor__list{margin-bottom:10px}',
-        '.yp-tt-editor__empty{color:#92989b;font-size:13px;margin-bottom:10px}',
-        '.yp-tt-editor__row{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid #e2e4e7;border-radius:4px;margin-bottom:6px;background:#fff}',
-        '.yp-tt-editor__row-name{font-size:13px;font-weight:bold;color:#313942}',
-        '.yp-tt-editor__row-meta{font-size:12px;color:#92989b;margin-top:2px}',
-        '.yp-tt-editor__row-actions{display:flex;gap:10px;margin-left:10px;flex-shrink:0}',
-        '.yp-tt-editor__btn{cursor:pointer;color:#92989b;font-size:14px}',
-        '.yp-tt-editor__btn:hover{color:#313942}',
-        '.yp-tt-editor__add{display:inline-block;cursor:pointer;color:#2e80b6;font-size:13px;margin-bottom:12px}',
-        '.yp-tt-editor__add:hover{text-decoration:underline}',
-        '.yp-tt-editor__form{border:1px solid #e2e4e7;border-radius:4px;padding:12px;background:#fbfbfb}',
-        '.yp-tt-editor__form label{display:block;font-size:13px;color:#313942;margin-bottom:10px}',
-        '.yp-tt-editor__form input[type=text],.yp-tt-editor__form textarea,.yp-tt-editor__form select{width:100%;box-sizing:border-box;margin-top:4px;padding:6px 8px;border:1px solid #d4d7da;border-radius:3px;font-size:13px;background:#fff}',
-        '.yp-tt-editor__form input[type=number]{width:70px;padding:6px 8px;border:1px solid #d4d7da;border-radius:3px;font-size:13px;background:#fff}',
-        '.yp-tt-editor__deadline{display:flex;align-items:center;gap:6px;margin-top:4px}',
-        '.yp-tt-editor__deadline select{width:auto;margin-top:0}',
-        '.yp-tt-editor__checkbox{display:flex;align-items:center;gap:6px}',
-        '.yp-tt-editor__checkbox input{margin:0}',
-        '.yp-tt-editor__form-buttons{display:flex;gap:10px;margin-top:4px}',
-        '.yp-tt-editor__form-buttons button{padding:7px 14px;border-radius:3px;border:1px solid #d4d7da;background:#fff;cursor:pointer;font-size:13px}',
-        '.yp-tt-editor__form-save{background:#4c8bf7 !important;border-color:#4c8bf7 !important;color:#fff}'
+        /* общее для модальных окон */
+        '.yp-tt-modal{padding:25px 30px;box-sizing:border-box}',
+        '.yp-tt-modal__title{font-size:18px;color:#313942;margin:0 0 18px;font-weight:normal}',
+        /* окно выбора шаблона */
+        '.yp-tt-picker__card{border:1px solid #e2e4e7;border-radius:4px;padding:12px 15px;margin-bottom:12px;cursor:pointer;background:#fff;transition:border-color .15s,box-shadow .15s}',
+        '.yp-tt-picker__card:hover{border-color:#b9bdc2;box-shadow:0 1px 3px rgba(0,0,0,.08)}',
+        '.yp-tt-picker__card_busy{opacity:.5;pointer-events:none}',
+        '.yp-tt-picker__card-name{font-size:15px;font-weight:bold;color:#313942;margin-bottom:6px}',
+        '.yp-tt-picker__card-line{font-size:13px;color:#92989b;line-height:18px}',
+        '.yp-tt-picker__manual{display:flex;gap:8px;align-items:center;margin-top:10px}',
+        '.yp-tt-picker__manual input{padding:6px 8px;border:1px solid #d4d7da;border-radius:3px;font-size:13px}',
+        '.yp-tt-picker__manual button{padding:6px 12px;border:none;border-radius:3px;background:#4c8bf7;color:#fff;font-size:13px;cursor:pointer}',
+        '.yp-tt-picker__empty{font-size:13px;color:#92989b;margin-bottom:15px}',
+        '.yp-tt-picker__editor-link{display:inline-block;font-size:13px;color:#2e80b6;cursor:pointer}',
+        '.yp-tt-picker__editor-link:hover{text-decoration:underline}',
+        /* редактор шаблонов */
+        '.yp-tt-list__row{display:flex;align-items:center;gap:12px;margin-bottom:10px}',
+        '.yp-tt-list__row-name{flex:1;padding:10px 14px;border:1px solid #e2e4e7;border-radius:3px;background:#fff;font-size:14px;color:#313942;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+        '.yp-tt-list__row-name:hover{border-color:#b9bdc2}',
+        '.yp-tt-list__row-delete{cursor:pointer;flex-shrink:0;display:inline-flex;color:#d99b9b}',
+        '.yp-tt-list__row-delete:hover{color:#cd5c5c}',
+        '.yp-tt-list__empty{font-size:13px;color:#92989b;margin-bottom:12px}',
+        '.yp-tt-list__add{display:inline-block;padding:9px 16px;border:1px solid #e2e4e7;border-radius:3px;background:#fff;font-size:13px;font-weight:bold;color:#313942;cursor:pointer}',
+        '.yp-tt-list__add:hover{background:#f5f6f7}',
+        /* форма шаблона */
+        '.yp-tt-form__field{margin-bottom:12px}',
+        '.yp-tt-form input[type=text],.yp-tt-form select,.yp-tt-form textarea,.yp-tt-form input[type=datetime-local]{width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #d4d7da;border-radius:3px;font-size:13px;background:#fff;color:#313942}',
+        '.yp-tt-form textarea{resize:vertical;min-height:70px}',
+        '.yp-tt-form__checkbox{display:flex;align-items:center;gap:8px;font-size:13px;color:#313942;cursor:pointer}',
+        '.yp-tt-form__checkbox input{margin:0}',
+        '.yp-tt-form__buttons{display:flex;align-items:center;gap:16px;margin-top:18px}',
+        '.yp-tt-form__save{padding:9px 18px;border:1px solid #d4d7da;border-radius:3px;background:#fff;font-size:13px;font-weight:bold;color:#313942;cursor:pointer}',
+        '.yp-tt-form__save:hover{background:#f5f6f7}',
+        '.yp-tt-form__cancel{font-size:13px;color:#92989b;cursor:pointer}',
+        '.yp-tt-form__cancel:hover{color:#313942}',
+        /* редактор внутри настроек виджета */
+        '.yp-tt-settings{margin:0 0 15px}',
+        '.yp-tt-settings__hint{font-size:13px;color:#92989b;margin-bottom:12px;line-height:17px}'
       ].join('');
       var styleEl = document.createElement('style');
       styleEl.id = STYLE_ID;
       styleEl.textContent = css;
       document.head.appendChild(styleEl);
     }
+
+    var TRASH_SVG = '<svg width="15" height="16" viewBox="0 0 15 16" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M1.5 4h12M5.5 4V2.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V4m2.5 0v9.5a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V4" ' +
+      'stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="M6 7v5M9 7v5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
 
     function showToast(message, isError) {
       injectStyles();
@@ -308,26 +440,326 @@ define(['jquery'], function ($) {
       }, 2600);
     }
 
-    // Блок со списком шаблонов в правой колонке карточки
-    function renderCardWidget() {
+    /* ------------------------------ модальные окна ------------------------------ */
+
+    function openYpModal(className, html, onReady) {
       injectStyles();
-      var templates = getTemplates();
-      var html = '<div class="yp-tt">';
-      if (!templates.length) {
-        html += '<div class="yp-tt__empty">' + escapeHtml(t('card.empty', 'Шаблоны не настроены.')) + '</div>';
+      var modal = new Modal({
+        class_name: 'yp-tt-modal-holder',
+        init: function ($modal_body) {
+          $modal_body
+            .addClass('yp-tt-modal ' + className)
+            .css({ width: '650px' })
+            .html(html)
+            .trigger('modal:loaded')
+            .trigger('modal:centrify');
+          if (onReady) {
+            onReady($modal_body, modal);
+          }
+        },
+        destroy: function () {}
+      });
+      return modal;
+    }
+
+    function closeYpModal(modal) {
+      try {
+        modal.destroy();
+      } catch (e) { /* окно уже закрыто */ }
+    }
+
+    /* ----------------------------- выбор шаблона ----------------------------- */
+
+    function pickerCardHtml(template) {
+      var deadlineLine;
+      if (template.manualDate) {
+        deadlineLine = t('picker.manual_date', 'Дата выбирается вручную') +
+          ' ' + t('picker.for', 'для') + ' ' + responsibleName(template);
       } else {
-        var typeNames = {};
-        getTaskTypes().forEach(function (type) {
-          typeNames[type.id] = type.name;
-        });
+        deadlineLine = t('picker.till', 'До') + ' ' + formatTs(computeCompleteTill(template)) +
+          ' ' + t('picker.for', 'для') + ' ' + responsibleName(template);
+      }
+      var typeName = getTaskTypeName(template.task_type_id);
+      var infoLine = typeName + (template.text ? ' — ' + template.text : '');
+      return '<div class="yp-tt-picker__card" data-tpl-id="' + escapeHtml(String(template.id)) + '">' +
+        '<div class="yp-tt-picker__card-name">' + escapeHtml(template.name || '') + '</div>' +
+        '<div class="yp-tt-picker__card-line">' + escapeHtml(deadlineLine) + '</div>' +
+        '<div class="yp-tt-picker__card-line">' + escapeHtml(infoLine) + '</div>' +
+        '</div>';
+    }
+
+    function datetimeLocalValue(date) {
+      return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+        'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    }
+
+    function openPickerModal() {
+      var templates = getTemplates();
+      var html = '<div class="yp-tt-picker">' +
+        '<h2 class="yp-tt-modal__title">' + escapeHtml(t('picker.title', 'Выберите шаблон для постановки задачи:')) + '</h2>';
+      if (!templates.length) {
+        html += '<div class="yp-tt-picker__empty">' + escapeHtml(t('picker.empty', 'Шаблоны не настроены. Добавьте их в редакторе шаблонов.')) + '</div>';
+      } else {
         templates.forEach(function (template) {
-          html += '<div class="yp-tt__item" data-tpl-id="' + escapeHtml(String(template.id)) + '" title="' + escapeHtml(template.text || '') + '">' +
-            '<div class="yp-tt__item-name">' + escapeHtml(template.name || '') + '</div>' +
-            '<div class="yp-tt__item-meta">' + escapeHtml((typeNames[template.task_type_id] || '') + ' · ' + deadlineLabel(template.deadline)) + '</div>' +
+          html += pickerCardHtml(template);
+        });
+      }
+      html += '<span class="yp-tt-picker__editor-link">' + escapeHtml(t('card.editor', 'Редактор шаблонов')) + '</span>' +
+        '</div>';
+
+      openYpModal('yp-tt-picker-modal', html, function ($body, modal) {
+        $body.find('.yp-tt-picker__editor-link').on('click', function () {
+          closeYpModal(modal);
+          openEditorModal(cardPersist);
+        });
+
+        $body.find('.yp-tt-picker__card').on('click', function () {
+          var $card = $(this);
+          if ($card.hasClass('yp-tt-picker__card_busy')) {
+            return;
+          }
+          var id = $card.attr('data-tpl-id');
+          var template = null;
+          getTemplates().forEach(function (item) {
+            if (String(item.id) === String(id)) {
+              template = item;
+            }
+          });
+          if (!template) {
+            return;
+          }
+
+          if (template.manualDate) {
+            // Срок выбирается вручную: показываем поле даты внутри карточки
+            if ($card.find('.yp-tt-picker__manual').length) {
+              return;
+            }
+            var defaultDate = new Date(Date.now() + 3600000);
+            var $manual = $(
+              '<div class="yp-tt-picker__manual">' +
+                '<input type="datetime-local" value="' + datetimeLocalValue(defaultDate) + '">' +
+                '<button type="button">' + escapeHtml(t('picker.create', 'Поставить задачу')) + '</button>' +
+              '</div>'
+            );
+            $manual.on('click', function (event) {
+              event.stopPropagation();
+            });
+            $manual.find('button').on('click', function () {
+              var value = $manual.find('input').val();
+              var parsed = value ? new Date(value) : null;
+              if (!parsed || isNaN(parsed.getTime())) {
+                return;
+              }
+              $card.addClass('yp-tt-picker__card_busy');
+              createTaskFromTemplate(template, Math.floor(parsed.getTime() / 1000), function (ok) {
+                $card.removeClass('yp-tt-picker__card_busy');
+                if (ok) {
+                  closeYpModal(modal);
+                }
+              });
+            });
+            $card.append($manual);
+            return;
+          }
+
+          $card.addClass('yp-tt-picker__card_busy');
+          createTaskFromTemplate(template, null, function (ok) {
+            $card.removeClass('yp-tt-picker__card_busy');
+            if (ok) {
+              closeYpModal(modal);
+            }
+          });
+        });
+      });
+    }
+
+    /* ----------------------------- форма шаблона ----------------------------- */
+
+    function buildFormFieldsHtml() {
+      var deadlineOptions = DEADLINE_PRESETS.map(function (preset) {
+        return '<option value="' + preset.key + '">' +
+          escapeHtml(t('form.deadline_prefix', 'Со сроком выполнения:') + ' ' + deadlinePresetLabel(preset.key)) +
+          '</option>';
+      }).join('');
+
+      var typeOptions = getTaskTypes().map(function (type) {
+        return '<option value="' + escapeHtml(String(type.id)) + '">' + escapeHtml(type.name) + '</option>';
+      }).join('');
+
+      var managerOptions = getManagers().map(function (manager) {
+        return '<option value="' + escapeHtml(String(manager.id)) + '">' + escapeHtml(manager.name) + '</option>';
+      }).join('');
+
+      return '<div class="yp-tt-form__field">' +
+          '<input type="text" name="tpl_name" placeholder="' + escapeHtml(t('form.name_placeholder', 'Название шаблона')) + '">' +
+        '</div>' +
+        '<div class="yp-tt-form__field">' +
+          '<select name="tpl_deadline">' + deadlineOptions + '</select>' +
+        '</div>' +
+        '<div class="yp-tt-form__field">' +
+          '<label class="yp-tt-form__checkbox">' +
+            '<input type="checkbox" name="tpl_manual"> ' + escapeHtml(t('form.manual_date', 'Выбор даты вручную')) +
+          '</label>' +
+        '</div>' +
+        '<div class="yp-tt-form__field">' +
+          '<select name="tpl_responsible">' +
+            '<option value="current">' + escapeHtml(t('form.responsible', 'Ответственный') + ': ' + t('form.responsible_current', 'Текущий пользователь')) + '</option>' +
+            '<option value="entity">' + escapeHtml(t('form.responsible', 'Ответственный') + ': ' + t('form.responsible_entity', 'Ответственный за карточку')) + '</option>' +
+            managerOptions +
+          '</select>' +
+        '</div>' +
+        '<div class="yp-tt-form__field">' +
+          '<select name="tpl_type">' + typeOptions + '</select>' +
+        '</div>' +
+        '<div class="yp-tt-form__field">' +
+          '<textarea name="tpl_text" rows="3" placeholder="' + escapeHtml(t('form.comment_placeholder', 'Добавьте комментарий')) + '"></textarea>' +
+        '</div>';
+    }
+
+    function fillForm($root, template) {
+      template = template || {};
+      $root.find('[name="tpl_name"]').val(template.name || '');
+      $root.find('[name="tpl_deadline"]').val(typeof template.deadline === 'string' ? template.deadline : 'now');
+      $root.find('[name="tpl_manual"]').prop('checked', !!template.manualDate);
+      $root.find('[name="tpl_responsible"]').val(String(template.responsible || 'current'));
+      var types = getTaskTypes();
+      $root.find('[name="tpl_type"]').val(String(template.task_type_id || (types[0] && types[0].id) || 1));
+      $root.find('[name="tpl_text"]').val(template.text || '');
+    }
+
+    function readForm($root, existing) {
+      var name = $.trim($root.find('[name="tpl_name"]').val());
+      if (!name) {
+        showToast(t('form.validation', 'Укажите название шаблона'), true);
+        return null;
+      }
+      return {
+        id: (existing && existing.id) || ('tpl_' + Date.now() + '_' + Math.floor(Math.random() * 10000)),
+        name: name,
+        text: $.trim($root.find('[name="tpl_text"]').val()),
+        task_type_id: parseInt($root.find('[name="tpl_type"]').val(), 10) || 1,
+        deadline: $root.find('[name="tpl_deadline"]').val() || 'now',
+        manualDate: $root.find('[name="tpl_manual"]').is(':checked'),
+        responsible: $root.find('[name="tpl_responsible"]').val() || 'current'
+      };
+    }
+
+    // Модальное окно «Создать шаблон» / редактирование существующего
+    function openFormModal(existing, onSave) {
+      var title = existing
+        ? t('form.title_edit', 'Редактировать шаблон')
+        : t('form.title_new', 'Создать шаблон');
+      var html = '<div class="yp-tt-form">' +
+        '<h2 class="yp-tt-modal__title">' + escapeHtml(title) + '</h2>' +
+        buildFormFieldsHtml() +
+        '<div class="yp-tt-form__buttons">' +
+          '<button type="button" class="yp-tt-form__save">' + escapeHtml(t('form.save', 'Сохранить')) + '</button>' +
+          '<span class="yp-tt-form__cancel">' + escapeHtml(t('form.cancel', 'Отменить')) + '</span>' +
+        '</div>' +
+        '</div>';
+
+      openYpModal('yp-tt-form-modal', html, function ($body, modal) {
+        fillForm($body, existing);
+        $body.find('.yp-tt-form__cancel').on('click', function () {
+          closeYpModal(modal);
+          onSave(null);
+        });
+        $body.find('.yp-tt-form__save').on('click', function () {
+          var template = readForm($body, existing);
+          if (!template) {
+            return;
+          }
+          closeYpModal(modal);
+          onSave(template);
+        });
+      });
+    }
+
+    /* --------------------------- редактор шаблонов --------------------------- */
+
+    function editorListHtml(templates) {
+      var html = '';
+      if (!templates.length) {
+        html += '<div class="yp-tt-list__empty">' + escapeHtml(t('editor.empty', 'Пока нет ни одного шаблона.')) + '</div>';
+      } else {
+        templates.forEach(function (template, index) {
+          html += '<div class="yp-tt-list__row" data-index="' + index + '">' +
+            '<div class="yp-tt-list__row-name">' + escapeHtml(template.name || '') + '</div>' +
+            '<span class="yp-tt-list__row-delete" title="' + escapeHtml(t('editor.delete', 'Удалить')) + '">' + TRASH_SVG + '</span>' +
             '</div>';
         });
       }
-      html += '</div>';
+      return html;
+    }
+
+    // Модальное окно «Редактор шаблонов».
+    // persist(templates, done) отвечает за сохранение изменений.
+    function openEditorModal(persist) {
+      var templates = getTemplates().slice();
+
+      var html = '<div class="yp-tt-list">' +
+        '<h2 class="yp-tt-modal__title">' + escapeHtml(t('editor.title', 'Редактор шаблонов')) + '</h2>' +
+        '<div class="yp-tt-list__items">' + editorListHtml(templates) + '</div>' +
+        '<button type="button" class="yp-tt-list__add">' + escapeHtml(t('editor.new', '+ новый шаблон')) + '</button>' +
+        '</div>';
+
+      openYpModal('yp-tt-editor-modal', html, function ($body, modal) {
+        function refresh() {
+          $body.find('.yp-tt-list__items').html(editorListHtml(templates));
+        }
+
+        function persistAndRefresh() {
+          persist(templates.slice(), function () {
+            refresh();
+          });
+        }
+
+        $body.on('click', '.yp-tt-list__row-delete', function (event) {
+          event.stopPropagation();
+          var index = parseInt($(this).closest('.yp-tt-list__row').attr('data-index'), 10);
+          templates.splice(index, 1);
+          persistAndRefresh();
+        });
+
+        $body.on('click', '.yp-tt-list__row-name', function () {
+          var index = parseInt($(this).closest('.yp-tt-list__row').attr('data-index'), 10);
+          closeYpModal(modal);
+          openFormModal(templates[index], function (updated) {
+            if (updated) {
+              templates[index] = updated;
+              persist(templates.slice(), function () {
+                openEditorModal(persist);
+              });
+            } else {
+              openEditorModal(persist);
+            }
+          });
+        });
+
+        $body.find('.yp-tt-list__add').on('click', function () {
+          closeYpModal(modal);
+          openFormModal(null, function (created) {
+            if (created) {
+              templates.push(created);
+              persist(templates.slice(), function () {
+                openEditorModal(persist);
+              });
+            } else {
+              openEditorModal(persist);
+            }
+          });
+        });
+      });
+    }
+
+    /* ---------------------------- блок в карточке ---------------------------- */
+
+    function renderCardWidget() {
+      injectStyles();
+      var html = '<div class="yp-tt">' +
+        '<button type="button" class="yp-tt__open">' + escapeHtml(t('card.open', 'Поставить задачу по шаблону')) + '</button>' +
+        '<span class="yp-tt__editor-open">' + escapeHtml(t('card.editor', 'Редактор шаблонов')) + '</span>' +
+        '</div>';
 
       self.render_template({
         caption: { class_name: 'yp-tt-card' },
@@ -336,14 +768,17 @@ define(['jquery'], function ($) {
       });
     }
 
-    /* ------------------------------ редактор шаблонов ------------------------------ */
+    /* ------------------------- редактор в настройках ------------------------- */
 
+    // В настройках виджета шаблоны сохраняются через скрытое JSON-поле:
+    // амо записывает его по стандартной кнопке «Сохранить». Это резервный
+    // путь для пользователей без прав на POST /api/v4/widgets/{code}.
     function renderSettingsEditor($modal_body) {
       injectStyles();
 
       var $field = $modal_body.find('input[name="templates"], textarea[name="templates"]').first();
 
-      var templates = getTemplates();
+      var templates = getTemplates().slice();
       try {
         var fieldValue = JSON.parse($field.val());
         if (Array.isArray(fieldValue)) {
@@ -351,64 +786,14 @@ define(['jquery'], function ($) {
         }
       } catch (e) { /* используем сохранённые настройки */ }
 
-      var taskTypes = getTaskTypes();
-      var managers = getManagers();
-      var editIndex = -1;
-
-      var typeOptions = taskTypes.map(function (type) {
-        return '<option value="' + escapeHtml(String(type.id)) + '">' + escapeHtml(type.name) + '</option>';
-      }).join('');
-      var managerOptions = managers.map(function (manager) {
-        return '<option value="' + escapeHtml(String(manager.id)) + '">' + escapeHtml(manager.name) + '</option>';
-      }).join('');
-
       var $editor = $(
-        '<div class="yp-tt-editor">' +
-          '<div class="yp-tt-editor__hint">' + escapeHtml(t('editor.hint', '')) + '</div>' +
-          '<div class="yp-tt-editor__list"></div>' +
-          '<span class="yp-tt-editor__add">' + escapeHtml(t('editor.add', '+ Добавить шаблон')) + '</span>' +
-          '<div class="yp-tt-editor__form" style="display:none">' +
-            '<label>' + escapeHtml(t('editor.form.name', 'Название шаблона')) +
-              '<input type="text" name="tpl_name">' +
-            '</label>' +
-            '<label>' + escapeHtml(t('editor.form.text', 'Текст задачи')) +
-              '<textarea name="tpl_text" rows="3"></textarea>' +
-            '</label>' +
-            '<label>' + escapeHtml(t('editor.form.type', 'Тип задачи')) +
-              '<select name="tpl_type">' + typeOptions + '</select>' +
-            '</label>' +
-            '<label>' + escapeHtml(t('editor.form.deadline', 'Срок выполнения')) +
-              '<span class="yp-tt-editor__deadline">' +
-                escapeHtml(t('editor.form.deadline_in', 'через')) +
-                '<input type="number" name="tpl_amount" min="0" value="1">' +
-                '<select name="tpl_unit">' +
-                  '<option value="minutes">' + escapeHtml(t('editor.units.minutes', 'минут')) + '</option>' +
-                  '<option value="hours">' + escapeHtml(t('editor.units.hours', 'часов')) + '</option>' +
-                  '<option value="days" selected>' + escapeHtml(t('editor.units.days', 'дней')) + '</option>' +
-                '</select>' +
-              '</span>' +
-            '</label>' +
-            '<label class="yp-tt-editor__checkbox">' +
-              '<input type="checkbox" name="tpl_eod"> ' + escapeHtml(t('editor.form.end_of_day', 'перенести на конец дня')) +
-            '</label>' +
-            '<label>' + escapeHtml(t('editor.form.responsible', 'Ответственный')) +
-              '<select name="tpl_responsible">' +
-                '<option value="current">' + escapeHtml(t('editor.form.responsible_current', 'Текущий пользователь')) + '</option>' +
-                '<option value="entity">' + escapeHtml(t('editor.form.responsible_entity', 'Ответственный за карточку')) + '</option>' +
-                (managerOptions
-                  ? '<optgroup label="' + escapeHtml(t('editor.form.responsible_users', 'Сотрудники')) + '">' + managerOptions + '</optgroup>'
-                  : '') +
-              '</select>' +
-            '</label>' +
-            '<div class="yp-tt-editor__form-buttons">' +
-              '<button type="button" class="yp-tt-editor__form-save">' + escapeHtml(t('editor.form.save', 'Сохранить шаблон')) + '</button>' +
-              '<button type="button" class="yp-tt-editor__form-cancel">' + escapeHtml(t('editor.form.cancel', 'Отмена')) + '</button>' +
-            '</div>' +
-          '</div>' +
+        '<div class="yp-tt-settings">' +
+          '<div class="yp-tt-settings__hint">' + escapeHtml(t('editor.hint', '')) + '</div>' +
+          '<div class="yp-tt-list__items">' + editorListHtml(templates) + '</div>' +
+          '<button type="button" class="yp-tt-list__add">' + escapeHtml(t('editor.new', '+ новый шаблон')) + '</button>' +
         '</div>'
       );
 
-      // Прячем техническое JSON-поле и ставим редактор на его место
       if ($field.length) {
         var $fieldWrap = $field.closest('.widget_settings_block__item_field');
         ($fieldWrap.length ? $fieldWrap : $field).hide().before($editor);
@@ -416,117 +801,44 @@ define(['jquery'], function ($) {
         $modal_body.append($editor);
       }
 
-      var $form = $editor.find('.yp-tt-editor__form');
-
-      // Записываем актуальный JSON в поле настроек: амо сохранит его по кнопке «Сохранить»
       function sync() {
         if ($field.length) {
           $field.val(JSON.stringify(templates)).trigger('input').trigger('change');
         }
       }
 
-      function renderList() {
-        var $list = $editor.find('.yp-tt-editor__list').empty();
-        if (!templates.length) {
-          $list.append($('<div class="yp-tt-editor__empty"></div>').text(t('editor.empty', 'Пока нет ни одного шаблона.')));
-          return;
-        }
-        var typeNames = {};
-        taskTypes.forEach(function (type) {
-          typeNames[type.id] = type.name;
-        });
-        templates.forEach(function (template, index) {
-          var $row = $(
-            '<div class="yp-tt-editor__row">' +
-              '<div class="yp-tt-editor__row-info">' +
-                '<div class="yp-tt-editor__row-name"></div>' +
-                '<div class="yp-tt-editor__row-meta"></div>' +
-              '</div>' +
-              '<div class="yp-tt-editor__row-actions">' +
-                '<span class="yp-tt-editor__btn yp-tt-editor__btn-edit" title="' + escapeHtml(t('editor.edit', 'Редактировать')) + '">&#9998;</span>' +
-                '<span class="yp-tt-editor__btn yp-tt-editor__btn-delete" title="' + escapeHtml(t('editor.delete', 'Удалить')) + '">&#10005;</span>' +
-              '</div>' +
-            '</div>'
-          );
-          $row.find('.yp-tt-editor__row-name').text(template.name || '');
-          $row.find('.yp-tt-editor__row-meta').text((typeNames[template.task_type_id] || '') + ' · ' + deadlineLabel(template.deadline));
-          $row.find('.yp-tt-editor__btn-edit').on('click', function () {
-            openForm(index);
-          });
-          $row.find('.yp-tt-editor__btn-delete').on('click', function () {
-            templates.splice(index, 1);
-            sync();
-            renderList();
-            if (editIndex === index) {
-              closeForm();
-            }
-          });
-          $list.append($row);
-        });
+      function refresh() {
+        $editor.find('.yp-tt-list__items').html(editorListHtml(templates));
       }
 
-      function openForm(index) {
-        editIndex = index;
-        var template = templates[index] || {
-          name: '',
-          text: '',
-          task_type_id: taskTypes[0] ? taskTypes[0].id : 1,
-          deadline: { amount: 1, unit: 'days', endOfDay: false },
-          responsible: 'current'
-        };
-        var deadline = template.deadline || {};
-        $form.find('[name="tpl_name"]').val(template.name || '');
-        $form.find('[name="tpl_text"]').val(template.text || '');
-        $form.find('[name="tpl_type"]').val(String(template.task_type_id || ''));
-        $form.find('[name="tpl_amount"]').val(deadline.amount != null ? deadline.amount : 1);
-        $form.find('[name="tpl_unit"]').val(deadline.unit || 'days');
-        $form.find('[name="tpl_eod"]').prop('checked', !!deadline.endOfDay);
-        $form.find('[name="tpl_responsible"]').val(String(template.responsible || 'current'));
-        $form.show();
-      }
-
-      function closeForm() {
-        editIndex = -1;
-        $form.hide();
-      }
-
-      $editor.find('.yp-tt-editor__add').on('click', function () {
-        openForm(templates.length);
-      });
-
-      $form.find('.yp-tt-editor__form-cancel').on('click', closeForm);
-
-      $form.find('.yp-tt-editor__form-save').on('click', function () {
-        var name = $.trim($form.find('[name="tpl_name"]').val());
-        var text = $.trim($form.find('[name="tpl_text"]').val());
-        if (!name || !text) {
-          showToast(t('editor.validation', 'Заполните название и текст задачи'), true);
-          return;
-        }
-        var existing = templates[editIndex];
-        var template = {
-          id: (existing && existing.id) || ('tpl_' + Date.now() + '_' + Math.floor(Math.random() * 10000)),
-          name: name,
-          text: text,
-          task_type_id: parseInt($form.find('[name="tpl_type"]').val(), 10) || 1,
-          deadline: {
-            amount: Math.max(0, parseInt($form.find('[name="tpl_amount"]').val(), 10) || 0),
-            unit: $form.find('[name="tpl_unit"]').val() || 'days',
-            endOfDay: $form.find('[name="tpl_eod"]').is(':checked')
-          },
-          responsible: $form.find('[name="tpl_responsible"]').val() || 'current'
-        };
-        if (editIndex >= 0 && editIndex < templates.length) {
-          templates[editIndex] = template;
-        } else {
-          templates.push(template);
-        }
+      $editor.on('click', '.yp-tt-list__row-delete', function (event) {
+        event.stopPropagation();
+        var index = parseInt($(this).closest('.yp-tt-list__row').attr('data-index'), 10);
+        templates.splice(index, 1);
         sync();
-        renderList();
-        closeForm();
+        refresh();
       });
 
-      renderList();
+      $editor.on('click', '.yp-tt-list__row-name', function () {
+        var index = parseInt($(this).closest('.yp-tt-list__row').attr('data-index'), 10);
+        openFormModal(templates[index], function (updated) {
+          if (updated) {
+            templates[index] = updated;
+            sync();
+            refresh();
+          }
+        });
+      });
+
+      $editor.find('.yp-tt-list__add').on('click', function () {
+        openFormModal(null, function (created) {
+          if (created) {
+            templates.push(created);
+            sync();
+            refresh();
+          }
+        });
+      });
     }
 
     /* --------------------------------- callbacks --------------------------------- */
@@ -551,28 +863,16 @@ define(['jquery'], function ($) {
       },
 
       bind_actions: function () {
-        // Делегированный обработчик переживает перерисовки карточки,
+        // Делегированные обработчики переживают перерисовки карточки,
         // неймспейс защищает от дублей при повторных вызовах bind_actions
-        $(document).off('click.ypTT').on('click.ypTT', '.yp-tt__item', function () {
-          var $item = $(this);
-          if ($item.hasClass('yp-tt__item_busy')) {
-            return;
-          }
-          var id = $item.attr('data-tpl-id');
-          var template = null;
-          getTemplates().forEach(function (item) {
-            if (String(item.id) === String(id)) {
-              template = item;
-            }
+        $(document)
+          .off('click.ypTT')
+          .on('click.ypTT', '.yp-tt__open', function () {
+            openPickerModal();
+          })
+          .on('click.ypTT', '.yp-tt__editor-open', function () {
+            openEditorModal(cardPersist);
           });
-          if (!template) {
-            return;
-          }
-          $item.addClass('yp-tt__item_busy');
-          createTaskFromTemplate(template, function () {
-            $item.removeClass('yp-tt__item_busy');
-          });
-        });
         return true;
       },
 
