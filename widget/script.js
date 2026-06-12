@@ -444,9 +444,12 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
 
     function openYpModal(className, html, onReady) {
       injectStyles();
-      var modal = new Modal({
+      // init вызывается синхронно из конструктора Modal, поэтому экземпляр
+      // окна берём из this, а не из ещё не присвоенной переменной
+      return new Modal({
         class_name: 'yp-tt-modal-holder',
         init: function ($modal_body) {
+          var modalInstance = this;
           $modal_body
             .addClass('yp-tt-modal ' + className)
             .css({ width: '650px' })
@@ -454,12 +457,11 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
             .trigger('modal:loaded')
             .trigger('modal:centrify');
           if (onReady) {
-            onReady($modal_body, modal);
+            onReady($modal_body, modalInstance);
           }
         },
         destroy: function () {}
       });
-      return modal;
     }
 
     function closeYpModal(modal) {
@@ -628,7 +630,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     }
 
     function readForm($root, existing) {
-      var name = $.trim($root.find('[name="tpl_name"]').val());
+      var name = String($root.find('[name="tpl_name"]').val() || '').trim();
       if (!name) {
         showToast(t('form.validation', 'Укажите название шаблона'), true);
         return null;
@@ -636,7 +638,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       return {
         id: (existing && existing.id) || ('tpl_' + Date.now() + '_' + Math.floor(Math.random() * 10000)),
         name: name,
-        text: $.trim($root.find('[name="tpl_text"]').val()),
+        text: String($root.find('[name="tpl_text"]').val() || '').trim(),
         task_type_id: parseInt($root.find('[name="tpl_type"]').val(), 10) || 1,
         deadline: $root.find('[name="tpl_deadline"]').val() || 'now',
         manualDate: $root.find('[name="tpl_manual"]').is(':checked'),
