@@ -120,6 +120,7 @@ function resetEnv() {
   ajaxCalls = [];
   ajaxHandlers = [];
   modals.splice(0).forEach((modal) => modal.destroyed || modal.$body.remove());
+  $('.yp-tt-toast').remove();
   $('#card-zone').remove();
   $(document).off('.ypTT');
 }
@@ -323,6 +324,36 @@ function resetCacheCheck(widget, createdId) {
   const picker = lastModal();
   assert(picker.$body.find('.yp-tt-picker__card[data-tpl-id="' + createdId + '"]').length === 1,
     'кэш: новый шаблон сразу виден в окне выбора');
+}
+
+/* 6б. Ошибка сохранения: введённое не теряется */
+section('Редактор: ошибка сохранения через API');
+{
+  resetEnv();
+  const widget = makeWidget([TPL_TOMORROW]);
+  widget.callbacks.render();
+  widget.callbacks.bind_actions();
+  $('#card-zone .yp-tt__editor-open').trigger('click');
+  lastModal().$body.find('.yp-tt-list__add').trigger('click');
+  const form = lastModal();
+  form.$body.find('[name="tpl_name"]').val('Несохранённый');
+  ajaxHandlers.push((call) => {
+    assert(call.url === '/api/v4/widgets/task_templates', 'попытка сохранить через API');
+    return { ok: false };
+  });
+  form.$body.find('.yp-tt-form__save').trigger('click');
+  const reopened = lastModal();
+  assert(reopened.$body.find('.yp-tt-list__row').length === 2,
+    'после ошибки редактор переоткрылся и введённый шаблон остался в списке');
+  assert($('.yp-tt-toast').text().indexOf('Не удалось сохранить') === 0,
+    'показан тост об ошибке сохранения');
+  reopened.$body.remove();
+  // кэш не обновился: в окне выбора по-прежнему один шаблон
+  widget.callbacks.bind_actions();
+  $('#card-zone .yp-tt__open').trigger('click');
+  assert(lastModal().$body.find('.yp-tt-picker__card').length === 1,
+    'кэш не обновлён — в окне выбора только сохранённый шаблон');
+  $('.yp-tt-toast').remove();
 }
 
 /* 7. Валидация формы */

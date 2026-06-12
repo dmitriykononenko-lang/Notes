@@ -326,11 +326,13 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
 
     /* ------------------------------ сохранение шаблонов ------------------------------ */
 
-    // Сохранение настроек виджета через API v4 (доступно администраторам)
+    // Сохранение настроек виджета через API v4 (доступно администраторам).
+    // В done передаётся флаг успеха и диагностика для сообщения об ошибке.
     function persistViaApi(templates, done) {
       var code = getWidgetCode();
       if (!code) {
-        done(false);
+        console.error('[Шаблоны задач] Не удалось определить код виджета. self.params:', self.params);
+        done(false, 'no_code');
         return;
       }
       $.ajax({
@@ -342,15 +344,21 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       }).done(function () {
         templatesCache = templates;
         done(true);
-      }).fail(function () {
-        done(false);
+      }).fail(function (xhr) {
+        console.error('[Шаблоны задач] Ошибка сохранения настроек. URL: /api/v4/widgets/' + code +
+          ', HTTP ' + (xhr && xhr.status), xhr && xhr.responseText, 'params:', self.params);
+        done(false, 'http_' + (xhr && xhr.status));
       });
     }
 
     function cardPersist(templates, done) {
-      persistViaApi(templates, function (ok) {
+      persistViaApi(templates, function (ok, errInfo) {
         if (!ok) {
-          showToast(t('editor.save_failed', 'Не удалось сохранить шаблоны. Изменить их можно в настройках виджета.'), true);
+          var message = t('editor.save_failed', 'Не удалось сохранить шаблоны. Изменить их можно в настройках виджета.');
+          if (errInfo && errInfo !== 'no_code') {
+            message += ' [' + errInfo.replace('http_', 'HTTP ') + ']';
+          }
+          showToast(message, true);
         }
         done(ok);
       });
@@ -696,8 +704,10 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
 
     // Модальное окно «Редактор шаблонов».
     // persist(templates, done) отвечает за сохранение изменений.
-    function openEditorModal(persist) {
-      var templates = getTemplates().slice();
+    // templatesOverride сохраняет локальное состояние списка между
+    // переоткрытиями окна, чтобы введённое не терялось при ошибке сохранения.
+    function openEditorModal(persist, templatesOverride) {
+      var templates = (templatesOverride || getTemplates()).slice();
 
       var html = '<div class="yp-tt-list">' +
         '<h2 class="yp-tt-modal__title">' + escapeHtml(t('editor.title', 'Редактор шаблонов')) + '</h2>' +
@@ -730,10 +740,10 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
             if (updated) {
               templates[index] = updated;
               persist(templates.slice(), function () {
-                openEditorModal(persist);
+                openEditorModal(persist, templates);
               });
             } else {
-              openEditorModal(persist);
+              openEditorModal(persist, templates);
             }
           });
         });
@@ -744,10 +754,10 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
             if (created) {
               templates.push(created);
               persist(templates.slice(), function () {
-                openEditorModal(persist);
+                openEditorModal(persist, templates);
               });
             } else {
-              openEditorModal(persist);
+              openEditorModal(persist, templates);
             }
           });
         });
