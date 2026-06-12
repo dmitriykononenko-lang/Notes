@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """Генерация набора логотипов для amoCRM-виджета «Шаблоны задач».
 
-Создаёт в widget/images/ стандартный набор размеров amoМаркета:
-logo.png 130x100, logo_min.png 84x84, logo_small.png 108x108,
-logo_medium.png 240x84, logo_dp.png 174x109, logo_main.png 400x272.
-
-Дизайн: синяя плашка со скруглением, белый чек-лист (строки задач,
-первая отмечена галочкой).
+Фирменный стиль KO:AGENCY: красный фон, белая графика, гротеск
+с разрядкой для вордмарки. Создаёт в widget/images/ стандартный
+набор размеров amoМаркета.
 """
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
-BLUE = (76, 139, 247, 255)
+RED = (230, 14, 14, 255)
 WHITE = (255, 255, 255, 255)
+FONT_PATH = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 
 SIZES = {
     "logo.png": (130, 100),
@@ -25,25 +23,22 @@ SIZES = {
 
 def draw_icon(draw, cx, cy, size):
     """Чек-лист: три строки, у первой галочка вместо маркера."""
-    line_w = max(2, size // 16)
-    rows = 3
+    line_w = max(2, size // 14)
     row_gap = size // 3
     top = cy - row_gap
     bullet = size // 7
     text_left = cx - size // 2 + bullet * 2 + size // 10
     text_right = cx + size // 2
 
-    for row in range(rows):
+    for row in range(3):
         y = top + row * row_gap
         bx = cx - size // 2
         if row == 0:
-            # галочка
             draw.line(
                 [(bx, y), (bx + bullet, y + bullet), (bx + bullet * 2, y - bullet)],
                 fill=WHITE, width=line_w, joint="curve",
             )
         else:
-            # квадратный маркер (пустой чекбокс)
             draw.rectangle(
                 [bx, y - bullet, bx + bullet * 2 - line_w, y + bullet],
                 outline=WHITE, width=line_w,
@@ -51,17 +46,54 @@ def draw_icon(draw, cx, cy, size):
         draw.line([(text_left, y), (text_right, y)], fill=WHITE, width=line_w)
 
 
+def draw_tracked_text(draw, text, font, center_x, center_y, tracking):
+    """Текст с разрядкой (letter-spacing), как в фирменном написании."""
+    widths = [draw.textlength(ch, font=font) for ch in text]
+    total = sum(widths) + tracking * (len(text) - 1)
+    ascent, descent = font.getmetrics()
+    x = center_x - total / 2
+    y = center_y - (ascent + descent) / 2
+    for ch, w in zip(text, widths):
+        draw.text((x, y), ch, font=font, fill=WHITE)
+        x += w + tracking
+
+
 def make_logo(path, width, height):
     scale = 4  # рисуем в 4x и уменьшаем для сглаживания
     w, h = width * scale, height * scale
-    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    img = Image.new("RGBA", (w, h), RED)
     draw = ImageDraw.Draw(img)
 
-    radius = min(w, h) // 8
-    draw.rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=BLUE)
+    wide = width / height > 2          # logo_medium 240x84
+    large = width >= 300               # logo_main 400x272
 
-    icon_size = int(min(w, h) * 0.5)
-    draw_icon(draw, w // 2, h // 2, icon_size)
+    if wide:
+        # иконка слева, вордмарка справа
+        icon_size = int(h * 0.45)
+        icon_cx = int(h * 0.55)
+        draw_icon(draw, icon_cx, h // 2, icon_size)
+        text_left = icon_cx + icon_size // 2 + int(h * 0.18)
+        text_right = w - int(h * 0.18)
+        tracking = int(h * 0.02)
+        # автоподбор кегля под доступную ширину
+        font_size = int(h * 0.30)
+        while font_size > 8:
+            font = ImageFont.truetype(FONT_PATH, font_size)
+            total = sum(draw.textlength(ch, font=font) for ch in "KO:AGENCY") + tracking * 8
+            if total <= text_right - text_left:
+                break
+            font_size -= 2
+        draw_tracked_text(draw, "KO:AGENCY", font, (text_left + text_right) / 2, h // 2, tracking)
+    elif large:
+        # иконка по центру, вордмарка под ней
+        icon_size = int(h * 0.42)
+        draw_icon(draw, w // 2, int(h * 0.40), icon_size)
+        font = ImageFont.truetype(FONT_PATH, int(h * 0.115))
+        draw_tracked_text(draw, "KO:AGENCY", font, w // 2, int(h * 0.78), int(h * 0.012))
+    else:
+        # компактные форматы: только иконка
+        icon_size = int(min(w, h) * 0.52)
+        draw_icon(draw, w // 2, h // 2, icon_size)
 
     img = img.resize((width, height), Image.LANCZOS)
     img.save(path)
