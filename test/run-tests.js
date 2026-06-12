@@ -188,8 +188,11 @@ require(path.join(__dirname, '..', 'widget', 'script.js'));
 const ruLang = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'widget', 'i18n', 'ru.json'), 'utf8'));
 const enLang = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'widget', 'i18n', 'en.json'), 'utf8'));
 
+let lastWidget = null;
+
 function makeWidget(templates, area) {
   const widget = new CustomWidget();
+  lastWidget = widget;
   widget.langs = ruLang;
   widget.get_settings = () => ({ templates: JSON.stringify(templates) });
   widget.system = () => ({ area: area || 'lcard-1' });
@@ -202,6 +205,11 @@ function makeWidget(templates, area) {
 }
 
 function resetEnv() {
+  // отключаем наблюдатели предыдущего инстанса, чтобы тесты не пересекались
+  if (lastWidget) {
+    lastWidget.callbacks.destroy();
+    lastWidget = null;
+  }
   ajaxCalls = [];
   ajaxOverrides = [];
   fakeCatalog = null;
@@ -576,16 +584,49 @@ section('Покрытие ключей локализации (ru/en)');
       '</li>' +
     '</ul></div>'
   ).appendTo(document.body);
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await new Promise((resolve) => setTimeout(resolve, 250));
   assert($menu.find('.yp-tt-menu-item').length === 1, 'пункт «Редактор шаблонов» добавлен в меню «...»');
   assert($menu.find('.yp-tt-menu-item .button-input__context-menu__item__text').text() === ruLang.card.editor,
     'текст пункта из локализации');
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await new Promise((resolve) => setTimeout(resolve, 250));
   assert($menu.find('.yp-tt-menu-item').length === 1, 'пункт не дублируется при повторных мутациях DOM');
   $menu.find('.yp-tt-menu-item').trigger('click');
   const editor = lastModal();
   assert(editor && editor.$body.find('.yp-tt-list__add').length === 1, 'клик по пункту открывает редактор шаблонов');
   widget.callbacks.destroy();
+  $menu.remove();
+
+  /* 12. Пункт «Шаблоны задач» в переключателе Чат/E-mail/Примечание/Задача */
+  section('Пункт в переключателе типа сообщения карточки');
+  resetEnv();
+  const cardWidget = makeWidget([TPL_TOMORROW], 'lcard-1');
+  cardWidget.callbacks.render();
+  cardWidget.callbacks.bind_actions();
+  // эмулируем переключатель из нижней части карточки
+  const $switcher = $(
+    '<div class="feed-compose-switcher">' +
+      '<div class="feed-compose-switcher__item" data-id="chat">Чат</div>' +
+      '<div class="feed-compose-switcher__item" data-id="email">E-mail</div>' +
+      '<div class="feed-compose-switcher__item" data-id="note">Примечание</div>' +
+      '<div class="feed-compose-switcher__item" data-id="task"><span class="icon-check"></span>Задача</div>' +
+    '</div>'
+  ).appendTo(document.body);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const $added = $switcher.find('.yp-tt-compose-item');
+  assert($added.length === 1, 'пункт «Шаблоны задач» добавлен в переключатель');
+  assert($added.text().trim() === ruLang.widget.name, 'текст пункта — название виджета');
+  assert(!$added.attr('data-id'), 'data-атрибуты у клона удалены (амо не перехватит клик)');
+  assert($added.find('.icon-check').length === 0, 'иконка-галочка активного пункта удалена');
+  assert($added.index() === 4, 'пункт стоит после «Задачи»');
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert($switcher.find('.yp-tt-compose-item').length === 1, 'пункт не дублируется при повторных мутациях');
+  $added.trigger('click');
+  const picker = lastModal();
+  assert(picker && picker.$body.find('.yp-tt-picker__card').length === 1,
+    'клик по пункту открывает окно выбора шаблона');
+  assert($switcher.is(':hidden'), 'переключатель скрывается после клика');
+  cardWidget.callbacks.destroy();
+  $switcher.remove();
 
   console.log('\nИтого: ' + passed + ' проверок пройдено, ' + failures + ' провалено');
   process.exit(failures ? 1 : 0);

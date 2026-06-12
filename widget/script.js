@@ -586,6 +586,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         '.yp-tt-list__add:hover{background:#f5f6f7}',
         /* пункт в меню «...» раздела Задачи */
         '.yp-tt-menu-item{cursor:pointer}',
+        '.yp-tt-compose-item{cursor:pointer}',
         '.yp-tt-menu-item__icon svg{vertical-align:middle}',
         /* форма шаблона */
         '.yp-tt-form__field{margin-bottom:12px}',
@@ -975,6 +976,17 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       return window.location.pathname.indexOf('/todo') === 0;
     }
 
+    function isCardArea() {
+      var area = safeArea();
+      var isCard = AREA_ENTITY.some(function (item) {
+        return area.indexOf(item.prefix) === 0;
+      });
+      if (isCard) {
+        return true;
+      }
+      return /\/(leads|contacts|companies)\/detail\//.test(window.location.pathname);
+    }
+
     var MENU_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">' +
       '<path d="M1.5 3.5l1.5 1.5L5.5 2M1.5 12.2h3M8 4h6.5M8 8h6.5M8 12h6.5" ' +
       'stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1008,16 +1020,109 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       });
     }
 
+    /* ------------- пункт «Шаблоны задач» в переключателе примечания ------------- */
+
+    // Метки пунктов переключателя (Чат / E-mail / Примечание / Задача)
+    var COMPOSE_TASK_LABELS = ['Задача', 'Task'];
+    var COMPOSE_NOTE_LABELS = ['Примечание', 'Note'];
+
+    function stripDataAttributes($el) {
+      $el.add($el.find('*')).each(function () {
+        var names = [];
+        for (var i = 0; i < this.attributes.length; i++) {
+          if (this.attributes[i].name.indexOf('data-') === 0) {
+            names.push(this.attributes[i].name);
+          }
+        }
+        var el = this;
+        names.forEach(function (name) {
+          el.removeAttribute(name);
+        });
+      });
+    }
+
+    function replaceTextContent($el, label) {
+      var replaced = false;
+      (function walk(node) {
+        for (var i = 0; i < node.childNodes.length; i++) {
+          var child = node.childNodes[i];
+          if (child.nodeType === 3 && child.nodeValue.replace(/\s+/g, '')) {
+            child.nodeValue = replaced ? '' : label;
+            replaced = true;
+          } else if (child.nodeType === 1) {
+            walk(child);
+          }
+        }
+      })($el.get(0));
+      if (!replaced) {
+        $el.text(label);
+      }
+    }
+
+    // Добавляем «Шаблоны задач» в выпадающий переключатель типа сообщения
+    // в нижней части карточки (Чат / E-mail / Примечание / Задача).
+    // Пункт клонируется с «Задачи», чтобы стиль всегда совпадал с нативным.
+    function tryInjectComposeMenuItem() {
+      if (!isCardArea()) {
+        return;
+      }
+      $('[class*="switcher"]').each(function () {
+        var $menu = $(this);
+        if ($menu.find('.yp-tt-compose-item').length) {
+          return;
+        }
+        var $children = $menu.children();
+        if ($children.length < 2 || $children.length > 8) {
+          return;
+        }
+        var $proto = null;
+        var hasNote = false;
+        $children.each(function () {
+          var text = $(this).text().replace(/\s+/g, ' ').trim();
+          if (COMPOSE_TASK_LABELS.indexOf(text) !== -1) {
+            $proto = $(this);
+          }
+          if (COMPOSE_NOTE_LABELS.indexOf(text) !== -1) {
+            hasNote = true;
+          }
+        });
+        if (!$proto || !hasNote) {
+          return;
+        }
+        var $item = $proto.clone(false).addClass('yp-tt-compose-item');
+        stripDataAttributes($item);
+        $item.find('svg, img, [class*="check"]').remove();
+        replaceTextContent($item, t('widget.name', 'Шаблоны задач'));
+        $item.on('click', function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          $menu.hide();
+          openPickerModal();
+        });
+        $proto.after($item);
+      });
+    }
+
     function setupTodoMenuObserver() {
       if (todoMenuObserver || !window.MutationObserver) {
         return;
       }
       injectStyles();
-      todoMenuObserver = new window.MutationObserver(function () {
+      var scheduled = false;
+      var runInjections = function () {
+        scheduled = false;
         tryInjectTodoMenuItem();
+        tryInjectComposeMenuItem();
+      };
+      todoMenuObserver = new window.MutationObserver(function () {
+        // лёгкий троттлинг: мутации в карточке происходят постоянно
+        if (!scheduled) {
+          scheduled = true;
+          setTimeout(runInjections, 150);
+        }
       });
       todoMenuObserver.observe(document.body, { childList: true, subtree: true });
-      tryInjectTodoMenuItem();
+      runInjections();
     }
 
     /* ---------------------------- блок в карточке ---------------------------- */
@@ -1158,6 +1263,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         $(document).off('click.ypTT');
         $('.yp-tt-toast').remove();
         $('.yp-tt-menu-item').remove();
+        $('.yp-tt-compose-item').remove();
         if (todoMenuObserver) {
           todoMenuObserver.disconnect();
           todoMenuObserver = null;
