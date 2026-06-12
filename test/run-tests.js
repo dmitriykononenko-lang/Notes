@@ -75,11 +75,96 @@ function lastModal() {
 }
 
 let ajaxCalls = [];
-let ajaxHandlers = [];
+let ajaxOverrides = []; // [{match(call), respond(call)}] — одноразовые перехваты
+let fakeCatalog = null; // эмуляция служебного списка: {id, fieldId, elements:[{id, value}]}
+let nextId = 1000;
+
+const STORAGE_NAME = 'Шаблоны задач (данные виджета)';
+
+function routerHandler(call) {
+  const method = (call.method || 'GET').toUpperCase();
+  const url = call.url;
+  if (url.startsWith('/api/v4/catalogs?') && method === 'GET') {
+    return {
+      ok: true,
+      data: { _embedded: { catalogs: fakeCatalog ? [{ id: fakeCatalog.id, name: STORAGE_NAME }] : [] } }
+    };
+  }
+  if (url === '/api/v4/catalogs' && method === 'POST') {
+    fakeCatalog = { id: ++nextId, fieldId: null, elements: [] };
+    return { ok: true, data: { _embedded: { catalogs: [{ id: fakeCatalog.id }] } } };
+  }
+  if (fakeCatalog && url === '/api/v4/catalogs/' + fakeCatalog.id + '/custom_fields') {
+    if (method === 'GET') {
+      return {
+        ok: true,
+        data: {
+          _embedded: {
+            custom_fields: fakeCatalog.fieldId
+              ? [{ id: fakeCatalog.fieldId, name: 'Данные', type: 'textarea' }]
+              : []
+          }
+        }
+      };
+    }
+    if (method === 'POST') {
+      fakeCatalog.fieldId = ++nextId;
+      return { ok: true, data: { _embedded: { custom_fields: [{ id: fakeCatalog.fieldId }] } } };
+    }
+  }
+  if (fakeCatalog && url.startsWith('/api/v4/catalogs/' + fakeCatalog.id + '/elements')) {
+    if (method === 'GET') {
+      return {
+        ok: true,
+        data: {
+          _embedded: {
+            elements: fakeCatalog.elements.map((el) => ({
+              id: el.id,
+              name: 'config',
+              custom_fields_values: [{ field_id: fakeCatalog.fieldId, values: [{ value: el.value }] }]
+            }))
+          }
+        }
+      };
+    }
+    if (method === 'POST') {
+      const body = JSON.parse(call.data)[0];
+      const el = { id: ++nextId, value: body.custom_fields_values[0].values[0].value };
+      fakeCatalog.elements.push(el);
+      return { ok: true, data: { _embedded: { elements: [{ id: el.id }] } } };
+    }
+    if (method === 'PATCH') {
+      const body = JSON.parse(call.data)[0];
+      const el = fakeCatalog.elements.find((item) => item.id === body.id);
+      if (el) {
+        el.value = body.custom_fields_values[0].values[0].value;
+      }
+      return { ok: true, data: {} };
+    }
+  }
+  return { ok: true, data: {} };
+}
+
+function savedCatalogTemplates() {
+  if (!fakeCatalog || !fakeCatalog.elements.length) {
+    return null;
+  }
+  return JSON.parse(fakeCatalog.elements[0].value);
+}
+
 $.ajax = function (opts) {
   ajaxCalls.push(opts);
-  const handler = ajaxHandlers.length ? ajaxHandlers.shift() : () => ({ ok: true, data: {} });
-  const result = handler(opts);
+  let result = null;
+  for (let i = 0; i < ajaxOverrides.length; i++) {
+    if (ajaxOverrides[i].match(opts)) {
+      result = ajaxOverrides[i].respond(opts);
+      ajaxOverrides.splice(i, 1);
+      break;
+    }
+  }
+  if (!result) {
+    result = routerHandler(opts);
+  }
   return {
     done(cb) {
       if (result.ok) cb(result.data);
@@ -118,7 +203,8 @@ function makeWidget(templates, area) {
 
 function resetEnv() {
   ajaxCalls = [];
-  ajaxHandlers = [];
+  ajaxOverrides = [];
+  fakeCatalog = null;
   modals.splice(0).forEach((modal) => modal.destroyed || modal.$body.remove());
   $('.yp-tt-toast').remove();
   $('#card-zone').remove();
@@ -211,9 +297,12 @@ section('Постановка задачи: ответственный за ка
   const widget = makeWidget([TPL_ENTITY]);
   widget.callbacks.render();
   widget.callbacks.bind_actions();
-  ajaxHandlers.push((call) => {
-    assert(call.url === '/api/v4/leads/123' && call.method === 'GET', 'сначала GET карточки за ответственным');
-    return { ok: true, data: { responsible_user_id: 777 } };
+  ajaxOverrides.push({
+    match: (call) => call.url === '/api/v4/leads/123',
+    respond: (call) => {
+      assert(call.method === 'GET', 'GET карточки за ответственным');
+      return { ok: true, data: { responsible_user_id: 777 } };
+    }
   });
   $('#card-zone .yp-tt__open').trigger('click');
   lastModal().$body.find('.yp-tt-picker__card').trigger('click');
@@ -277,12 +366,13 @@ section('Редактор шаблонов (модальное окно)');
   assert(editor.$body.find('.yp-tt-list__row').length === 2, 'в редакторе две строки шаблонов');
   assert(editor.$body.find('.yp-tt-list__add').length === 1, 'есть кнопка «+ новый шаблон»');
 
-  // удаление
+  // удаление: при первом сохранении виджет сам создаёт служебный список
   editor.$body.find('.yp-tt-list__row').first().find('.yp-tt-list__row-delete').trigger('click');
-  let save = ajaxCalls.find((call) => call.url === '/api/v4/widgets/task_templates');
-  assert(!!save, 'удаление сохранено через POST /api/v4/widgets/{code}');
-  let savedTemplates = JSON.parse(JSON.parse(save.data).settings.templates);
-  assert(savedTemplates.length === 1 && savedTemplates[0].id === 'tpl_2', 'остался только второй шаблон');
+  assert(!!fakeCatalog, 'служебный список создан при первом сохранении');
+  assert(!!fakeCatalog.fieldId, 'в списке создано текстовое поле');
+  let savedTemplates = savedCatalogTemplates();
+  assert(savedTemplates && savedTemplates.length === 1 && savedTemplates[0].id === 'tpl_2',
+    'после удаления в хранилище остался только второй шаблон');
   assert(editor.$body.find('.yp-tt-list__row').length === 1, 'список в редакторе обновился');
 
   // добавление
@@ -302,10 +392,9 @@ section('Редактор шаблонов (модальное окно)');
   form.$body.find('[name="tpl_responsible"]').val('202');
   form.$body.find('.yp-tt-form__save').trigger('click');
 
-  save = ajaxCalls.find((call) => call.url === '/api/v4/widgets/task_templates');
-  assert(!!save, 'добавление сохранено через POST /api/v4/widgets/{code}');
-  savedTemplates = JSON.parse(JSON.parse(save.data).settings.templates);
-  assert(savedTemplates.length === 2, 'в сохранённом наборе два шаблона');
+  savedTemplates = savedCatalogTemplates();
+  assert(savedTemplates && savedTemplates.length === 2, 'в хранилище два шаблона (обновление элемента списка)');
+  assert(fakeCatalog.elements.length === 1, 'элемент списка один — обновляется, а не плодится');
   const created = savedTemplates[1];
   assert(created.name === 'Перезвонить' && created.deadline === 'hour1' &&
     created.responsible === '202' && created.task_type_id === 1 && !created.manualDate,
@@ -337,9 +426,10 @@ section('Редактор: ошибка сохранения через API');
   lastModal().$body.find('.yp-tt-list__add').trigger('click');
   const form = lastModal();
   form.$body.find('[name="tpl_name"]').val('Несохранённый');
-  ajaxHandlers.push((call) => {
-    assert(call.url === '/api/v4/widgets/task_templates', 'попытка сохранить через API');
-    return { ok: false };
+  // создание служебного списка падает (например, нет прав на списки)
+  ajaxOverrides.push({
+    match: (call) => call.url === '/api/v4/catalogs' && (call.method || '').toUpperCase() === 'POST',
+    respond: () => ({ ok: false })
   });
   form.$body.find('.yp-tt-form__save').trigger('click');
   const reopened = lastModal();
@@ -390,9 +480,10 @@ section('Редактор в настройках виджета');
 
   const fieldValue = JSON.parse($modalBody.find('input[name="templates"]').val());
   assert(fieldValue.length === 2 && fieldValue[1].name === 'Из настроек' && fieldValue[1].manualDate === true,
-    'JSON-поле настроек синхронизировано с редактором');
-  assert(ajaxCalls.filter((call) => call.url === '/api/v4/widgets/task_templates').length === 0,
-    'в настройках API не вызывается — сохраняет кнопка амо');
+    'JSON-поле настроек синхронизировано как резервная копия');
+  const stored = savedCatalogTemplates();
+  assert(stored && stored.length === 2 && stored[1].name === 'Из настроек',
+    'изменения из настроек записаны и в служебный список');
   $modalBody.remove();
 }
 
@@ -407,6 +498,33 @@ section('Пустой список шаблонов');
   const picker = lastModal();
   assert(picker.$body.find('.yp-tt-picker__empty').length === 1, 'в окне выбора подсказка о пустом списке');
   assert(picker.$body.find('.yp-tt-picker__editor-link').length === 1, 'есть ссылка на редактор шаблонов');
+}
+
+/* 9б. Шаблоны переживают «перезагрузку страницы» */
+section('Чтение из служебного списка после перезагрузки');
+{
+  resetEnv();
+  // первый «сеанс»: создаём и сохраняем шаблон
+  const widget1 = makeWidget([]);
+  widget1.callbacks.render();
+  widget1.callbacks.bind_actions();
+  $('#card-zone .yp-tt__editor-open').trigger('click');
+  lastModal().$body.find('.yp-tt-list__add').trigger('click');
+  const form = lastModal();
+  form.$body.find('[name="tpl_name"]').val('Постоянный');
+  form.$body.find('.yp-tt-form__save').trigger('click');
+  assert(savedCatalogTemplates() !== null, 'шаблон записан в служебный список');
+
+  // второй «сеанс»: новый инстанс виджета с пустыми настройками и пустым кэшем
+  $('.modal-stub').remove();
+  const widget2 = makeWidget([]);
+  widget2.callbacks.render();
+  widget2.callbacks.bind_actions();
+  $('#card-zone .yp-tt__open').trigger('click');
+  const picker = lastModal();
+  assert(picker.$body.find('.yp-tt-picker__card').length === 1 &&
+    picker.$body.find('.yp-tt-picker__card-name').text() === 'Постоянный',
+    'после «перезагрузки» шаблоны прочитаны из служебного списка');
 }
 
 /* 10. Покрытие ключей локализации */

@@ -13,10 +13,10 @@
  *    «Создать шаблон» (срок-пресет, выбор даты вручную, ответственный,
  *    тип задачи, комментарий).
  *
- * Шаблоны хранятся в настройках виджета JSON-строкой (поле `templates`).
- * Сохранение из редактора в карточке идёт через POST /api/v4/widgets/{code};
- * резервный путь — редактирование в настройках виджета (поле синхронизируется
- * со стандартной кнопкой «Сохранить»).
+ * Хранение: служебный список «Шаблоны задач (данные виджета)» (catalogs
+ * API v4) — один элемент с JSON шаблонов в текстовом поле. Виджет создаёт
+ * список автоматически при первом сохранении. Поле настроек `templates`
+ * используется как резервная копия и для миграции.
  */
 define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
   var CustomWidget = function () {
@@ -77,10 +77,9 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         .replace(/'/g, '&#39;');
     }
 
-    function getTemplates() {
-      if (templatesCache !== null) {
-        return templatesCache;
-      }
+    // Синхронное чтение шаблонов из поля настроек виджета
+    // (резерв и миграция; основное хранилище — служебный список, см. ниже)
+    function readSettingsTemplates() {
       var settings = self.get_settings() || {};
       if (!settings.templates) {
         return [];
@@ -91,6 +90,13 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       } catch (e) {
         return [];
       }
+    }
+
+    function getTemplates() {
+      if (templatesCache !== null) {
+        return templatesCache;
+      }
+      return readSettingsTemplates();
     }
 
     function getTaskTypes() {
@@ -157,11 +163,6 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       } catch (e) {
         return { id: null, name: '' };
       }
-    }
-
-    function getWidgetCode() {
-      var params = self.params || {};
-      return params.widget_code || params.code || null;
     }
 
     // Определяем сущность и id открытой карточки
@@ -327,38 +328,213 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       });
     }
 
-    /* ------------------------------ сохранение шаблонов ------------------------------ */
+    /* ------------------------------ хранилище шаблонов ------------------------------ */
 
-    // Сохранение настроек виджета через API v4 (доступно администраторам).
-    // В done передаётся флаг успеха и диагностика для сообщения об ошибке.
-    function persistViaApi(templates, done) {
-      var code = getWidgetCode();
-      if (!code) {
-        console.error('[Шаблоны задач] Не удалось определить код виджета. self.params:', self.params);
-        done(false, 'no_code');
+    // Основное хранилище — служебный список (catalogs API v4): один элемент
+    // с JSON шаблонов в текстовом поле. Документированный API, доступен из
+    // интерфейса всем пользователям с правами на списки; в отличие от
+    // настроек виджета, запись работает не только из окна настроек.
+
+    var STORAGE_CATALOG_NAME = 'Шаблоны задач (данные виджета)';
+    var STORAGE_FIELD_NAME = 'Данные';
+    var STORAGE_ELEMENT_NAME = 'config';
+    var storage = { catalogId: null, fieldId: null, elementId: null };
+
+    function logStorageError(stage, xhr) {
+      console.error('[Шаблоны задач] Ошибка хранилища на шаге «' + stage + '», HTTP ' +
+        (xhr && xhr.status), xhr && xhr.responseText);
+    }
+
+    // Ищем служебный список и текстовое поле в нём
+    function findStorage(callback) {
+      if (storage.catalogId && storage.fieldId) {
+        callback(true);
         return;
       }
       $.ajax({
-        url: '/api/v4/widgets/' + code,
-        method: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify({ settings: { templates: JSON.stringify(templates) } }),
+        url: '/api/v4/catalogs?limit=250',
+        method: 'GET',
         dataType: 'json'
-      }).done(function () {
-        templatesCache = templates;
-        done(true);
+      }).done(function (response) {
+        var catalogs = (response && response._embedded && response._embedded.catalogs) || [];
+        var found = null;
+        catalogs.forEach(function (catalog) {
+          if (catalog && catalog.name === STORAGE_CATALOG_NAME) {
+            found = catalog;
+          }
+        });
+        if (!found) {
+          callback(false);
+          return;
+        }
+        storage.catalogId = found.id;
+        findStorageField(callback);
       }).fail(function (xhr) {
-        console.error('[Шаблоны задач] Ошибка сохранения настроек. URL: /api/v4/widgets/' + code +
-          ', HTTP ' + (xhr && xhr.status), xhr && xhr.responseText, 'params:', self.params);
-        done(false, 'http_' + (xhr && xhr.status));
+        logStorageError('поиск списка', xhr);
+        callback(false);
       });
     }
 
-    function cardPersist(templates, done) {
-      persistViaApi(templates, function (ok, errInfo) {
+    function findStorageField(callback) {
+      $.ajax({
+        url: '/api/v4/catalogs/' + storage.catalogId + '/custom_fields',
+        method: 'GET',
+        dataType: 'json'
+      }).done(function (response) {
+        var fields = (response && response._embedded && response._embedded.custom_fields) || [];
+        var found = null;
+        fields.forEach(function (field) {
+          if (!found && field && (field.name === STORAGE_FIELD_NAME || field.type === 'textarea')) {
+            found = field;
+          }
+        });
+        if (found) {
+          storage.fieldId = found.id;
+        }
+        callback(!!found);
+      }).fail(function (xhr) {
+        logStorageError('поиск поля', xhr);
+        callback(false);
+      });
+    }
+
+    // Создаём служебный список с текстовым полем (первое сохранение)
+    function createStorage(callback) {
+      $.ajax({
+        url: '/api/v4/catalogs',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify([{ name: STORAGE_CATALOG_NAME, type: 'regular', can_add_elements: false }]),
+        dataType: 'json'
+      }).done(function (response) {
+        var created = response && response._embedded && response._embedded.catalogs &&
+          response._embedded.catalogs[0];
+        if (!created || !created.id) {
+          callback(false);
+          return;
+        }
+        storage.catalogId = created.id;
+        $.ajax({
+          url: '/api/v4/catalogs/' + storage.catalogId + '/custom_fields',
+          method: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify([{ name: STORAGE_FIELD_NAME, type: 'textarea' }]),
+          dataType: 'json'
+        }).done(function (fieldResponse) {
+          var field = fieldResponse && fieldResponse._embedded && fieldResponse._embedded.custom_fields &&
+            fieldResponse._embedded.custom_fields[0];
+          if (field && field.id) {
+            storage.fieldId = field.id;
+            callback(true);
+          } else {
+            callback(false);
+          }
+        }).fail(function (xhr) {
+          logStorageError('создание поля', xhr);
+          callback(false);
+        });
+      }).fail(function (xhr) {
+        logStorageError('создание списка', xhr);
+        callback(false);
+      });
+    }
+
+    // Загрузка шаблонов: кэш страницы → служебный список → поле настроек
+    function loadTemplates(callback) {
+      if (templatesCache !== null) {
+        callback(templatesCache);
+        return;
+      }
+      findStorage(function (found) {
+        if (!found) {
+          templatesCache = readSettingsTemplates();
+          callback(templatesCache);
+          return;
+        }
+        $.ajax({
+          url: '/api/v4/catalogs/' + storage.catalogId + '/elements?limit=50',
+          method: 'GET',
+          dataType: 'json'
+        }).done(function (response) {
+          var elements = (response && response._embedded && response._embedded.elements) || [];
+          var list = readSettingsTemplates();
+          elements.forEach(function (element) {
+            var values = (element && element.custom_fields_values) || [];
+            values.forEach(function (value) {
+              if (value && value.field_id === storage.fieldId &&
+                  value.values && value.values[0] && value.values[0].value) {
+                try {
+                  var parsed = JSON.parse(value.values[0].value);
+                  if (Array.isArray(parsed)) {
+                    list = parsed;
+                    storage.elementId = element.id;
+                  }
+                } catch (e) { /* битый JSON — остаёмся на настройках */ }
+              }
+            });
+          });
+          templatesCache = list;
+          callback(list);
+        }).fail(function (xhr) {
+          logStorageError('чтение элементов', xhr);
+          templatesCache = readSettingsTemplates();
+          callback(templatesCache);
+        });
+      });
+    }
+
+    // Сохранение шаблонов в служебный список
+    function saveTemplates(templates, done) {
+      var json = JSON.stringify(templates);
+
+      function writeElement() {
+        var values = [{ field_id: storage.fieldId, values: [{ value: json }] }];
+        var isUpdate = !!storage.elementId;
+        var payload = isUpdate
+          ? [{ id: storage.elementId, name: STORAGE_ELEMENT_NAME, custom_fields_values: values }]
+          : [{ name: STORAGE_ELEMENT_NAME, custom_fields_values: values }];
+        $.ajax({
+          url: '/api/v4/catalogs/' + storage.catalogId + '/elements',
+          method: isUpdate ? 'PATCH' : 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify(payload),
+          dataType: 'json'
+        }).done(function (response) {
+          if (!isUpdate) {
+            var element = response && response._embedded && response._embedded.elements &&
+              response._embedded.elements[0];
+            if (element && element.id) {
+              storage.elementId = element.id;
+            }
+          }
+          templatesCache = templates;
+          done(true);
+        }).fail(function (xhr) {
+          logStorageError('запись элемента', xhr);
+          done(false, 'http_' + (xhr && xhr.status));
+        });
+      }
+
+      findStorage(function (found) {
+        if (found) {
+          writeElement();
+          return;
+        }
+        createStorage(function (created) {
+          if (!created) {
+            done(false, 'storage');
+            return;
+          }
+          writeElement();
+        });
+      });
+    }
+
+    function persistWithToast(templates, done) {
+      saveTemplates(templates, function (ok, errInfo) {
         if (!ok) {
           var message = t('editor.save_failed', 'Не удалось сохранить шаблоны. Изменить их можно в настройках виджета.');
-          if (errInfo && errInfo !== 'no_code') {
+          if (errInfo && errInfo !== 'storage') {
             message += ' [' + errInfo.replace('http_', 'HTTP ') + ']';
           }
           showToast(message, true);
@@ -510,7 +686,12 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     }
 
     function openPickerModal() {
-      var templates = getTemplates();
+      loadTemplates(function (templates) {
+        openPickerModalWith(templates);
+      });
+    }
+
+    function openPickerModalWith(templates) {
       var html = '<div class="yp-tt-picker">' +
         '<h2 class="yp-tt-modal__title">' + escapeHtml(t('picker.title', 'Выберите шаблон для постановки задачи:')) + '</h2>';
       if (!templates.length) {
@@ -526,7 +707,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       openYpModal('yp-tt-picker-modal', html, function ($body, modal) {
         $body.find('.yp-tt-picker__editor-link').on('click', function () {
           closeYpModal(modal);
-          openEditorModal(cardPersist);
+          openEditorModal(persistWithToast);
         });
 
         $body.find('.yp-tt-picker__card').on('click', function () {
@@ -536,7 +717,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
           }
           var id = $card.attr('data-tpl-id');
           var template = null;
-          getTemplates().forEach(function (item) {
+          templates.forEach(function (item) {
             if (String(item.id) === String(id)) {
               template = item;
             }
@@ -713,7 +894,13 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     // templatesOverride сохраняет локальное состояние списка между
     // переоткрытиями окна, чтобы введённое не терялось при ошибке сохранения.
     function openEditorModal(persist, templatesOverride) {
-      var templates = (templatesOverride || getTemplates()).slice();
+      if (!templatesOverride) {
+        loadTemplates(function (loaded) {
+          openEditorModal(persist, loaded);
+        });
+        return;
+      }
+      var templates = templatesOverride.slice();
 
       var html = '<div class="yp-tt-list">' +
         '<h2 class="yp-tt-modal__title">' + escapeHtml(t('editor.title', 'Редактор шаблонов')) + '</h2>' +
@@ -815,7 +1002,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         );
         $item.find('.button-input__context-menu__item__text').text(t('card.editor', 'Редактор шаблонов'));
         $item.on('click', function () {
-          openEditorModal(cardPersist);
+          openEditorModal(persistWithToast);
         });
         $target.append($item);
       });
@@ -851,21 +1038,20 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
 
     /* ------------------------- редактор в настройках ------------------------- */
 
-    // В настройках виджета шаблоны сохраняются через скрытое JSON-поле:
-    // амо записывает его по стандартной кнопке «Сохранить». Это резервный
-    // путь для пользователей без прав на POST /api/v4/widgets/{code}.
+    // Тот же редактор в окне настроек виджета. Изменения сразу пишутся в
+    // служебный список (persistWithToast), а скрытое JSON-поле настроек
+    // синхронизируется как резервная копия — её амо сохранит по кнопке
+    // «Сохранить» (используется для миграции и при недоступности списков).
     function renderSettingsEditor($modal_body) {
       injectStyles();
+      loadTemplates(function (loaded) {
+        buildSettingsEditor($modal_body, loaded);
+      });
+    }
 
+    function buildSettingsEditor($modal_body, loadedTemplates) {
       var $field = $modal_body.find('input[name="templates"], textarea[name="templates"]').first();
-
-      var templates = getTemplates().slice();
-      try {
-        var fieldValue = JSON.parse($field.val());
-        if (Array.isArray(fieldValue)) {
-          templates = fieldValue;
-        }
-      } catch (e) { /* используем сохранённые настройки */ }
+      var templates = loadedTemplates.slice();
 
       var $editor = $(
         '<div class="yp-tt-settings">' +
@@ -882,10 +1068,12 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         $modal_body.append($editor);
       }
 
+      // Записываем в служебный список и дублируем в поле настроек
       function sync() {
         if ($field.length) {
           $field.val(JSON.stringify(templates)).trigger('input').trigger('change');
         }
+        persistWithToast(templates.slice(), function () {});
       }
 
       function refresh() {
@@ -952,7 +1140,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
             openPickerModal();
           })
           .on('click.ypTT', '.yp-tt__editor-open', function () {
-            openEditorModal(cardPersist);
+            openEditorModal(persistWithToast);
           });
         return true;
       },
