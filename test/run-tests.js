@@ -441,5 +441,34 @@ section('Покрытие ключей локализации (ru/en)');
   });
 }
 
-console.log('\nИтого: ' + passed + ' проверок пройдено, ' + failures + ' провалено');
-process.exit(failures ? 1 : 0);
+/* 11. Пункт меню «Редактор шаблонов» в разделе Задачи */
+(async () => {
+  section('Пункт меню в разделе Задачи');
+  resetEnv();
+  const widget = makeWidget([TPL_TOMORROW], 'todo');
+  widget.callbacks.render();
+  widget.callbacks.bind_actions();
+  // эмулируем выпадающее меню «...» из интерфейса амо
+  const $menu = $(
+    '<div class="button-input__context-menu"><ul>' +
+      '<li class="button-input__context-menu__item">' +
+        '<div class="button-input__context-menu__item__inner">' +
+          '<span class="button-input__context-menu__item__text">Экспорт</span>' +
+        '</div>' +
+      '</li>' +
+    '</ul></div>'
+  ).appendTo(document.body);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert($menu.find('.yp-tt-menu-item').length === 1, 'пункт «Редактор шаблонов» добавлен в меню «...»');
+  assert($menu.find('.yp-tt-menu-item .button-input__context-menu__item__text').text() === ruLang.card.editor,
+    'текст пункта из локализации');
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert($menu.find('.yp-tt-menu-item').length === 1, 'пункт не дублируется при повторных мутациях DOM');
+  $menu.find('.yp-tt-menu-item').trigger('click');
+  const editor = lastModal();
+  assert(editor && editor.$body.find('.yp-tt-list__add').length === 1, 'клик по пункту открывает редактор шаблонов');
+  widget.callbacks.destroy();
+
+  console.log('\nИтого: ' + passed + ' проверок пройдено, ' + failures + ' провалено');
+  process.exit(failures ? 1 : 0);
+})();

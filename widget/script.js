@@ -48,6 +48,9 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     // только после перезагрузки страницы)
     var templatesCache = null;
 
+    // Наблюдатель за появлением меню «...» в разделе Задачи
+    var todoMenuObserver = null;
+
     /* ------------------------------ локализация ------------------------------ */
 
     function t(key, fallback) {
@@ -405,6 +408,9 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         '.yp-tt-list__empty{font-size:13px;color:#92989b;margin-bottom:12px}',
         '.yp-tt-list__add{display:inline-block;padding:9px 16px;border:1px solid #e2e4e7;border-radius:3px;background:#fff;font-size:13px;font-weight:bold;color:#313942;cursor:pointer}',
         '.yp-tt-list__add:hover{background:#f5f6f7}',
+        /* пункт в меню «...» раздела Задачи */
+        '.yp-tt-menu-item{cursor:pointer}',
+        '.yp-tt-menu-item__icon svg{vertical-align:middle}',
         /* форма шаблона */
         '.yp-tt-form__field{margin-bottom:12px}',
         '.yp-tt-form input[type=text],.yp-tt-form select,.yp-tt-form textarea,.yp-tt-form input[type=datetime-local]{width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #d4d7da;border-radius:3px;font-size:13px;background:#fff;color:#313942}',
@@ -764,6 +770,69 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       });
     }
 
+    /* ------------------------ меню «...» в разделе Задачи ------------------------ */
+
+    function safeArea() {
+      try {
+        return String((self.system() || {}).area || '');
+      } catch (e) {
+        return '';
+      }
+    }
+
+    function isTodoArea() {
+      var area = safeArea();
+      if (area.indexOf('todo') === 0 || area.indexOf('tlist') === 0) {
+        return true;
+      }
+      return window.location.pathname.indexOf('/todo') === 0;
+    }
+
+    var MENU_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M1.5 3.5l1.5 1.5L5.5 2M1.5 12.2h3M8 4h6.5M8 8h6.5M8 12h6.5" ' +
+      'stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    // Добавляем пункт «Редактор шаблонов» в выпадающее меню «...»
+    // в правом верхнем углу раздела Задачи (как у виджета-примера)
+    function tryInjectTodoMenuItem() {
+      if (!isTodoArea()) {
+        return;
+      }
+      $('.button-input__context-menu').each(function () {
+        var $menu = $(this);
+        if ($menu.find('.yp-tt-menu-item').length) {
+          return;
+        }
+        var $list = $menu.is('ul') ? $menu : $menu.find('ul').first();
+        var $target = $list.length ? $list : $menu;
+        var $item = $(
+          '<li class="button-input__context-menu__item yp-tt-menu-item">' +
+            '<div class="button-input__context-menu__item__inner">' +
+              '<span class="button-input__context-menu__item__icon-container yp-tt-menu-item__icon">' + MENU_ICON_SVG + '</span>' +
+              '<span class="button-input__context-menu__item__text"></span>' +
+            '</div>' +
+          '</li>'
+        );
+        $item.find('.button-input__context-menu__item__text').text(t('card.editor', 'Редактор шаблонов'));
+        $item.on('click', function () {
+          openEditorModal(cardPersist);
+        });
+        $target.append($item);
+      });
+    }
+
+    function setupTodoMenuObserver() {
+      if (todoMenuObserver || !window.MutationObserver) {
+        return;
+      }
+      injectStyles();
+      todoMenuObserver = new window.MutationObserver(function () {
+        tryInjectTodoMenuItem();
+      });
+      todoMenuObserver.observe(document.body, { childList: true, subtree: true });
+      tryInjectTodoMenuItem();
+    }
+
     /* ---------------------------- блок в карточке ---------------------------- */
 
     function renderCardWidget() {
@@ -857,16 +926,16 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
 
     this.callbacks = {
       render: function () {
-        var area = '';
-        try {
-          area = String((self.system() || {}).area || '');
-        } catch (e) { /* не карточка */ }
+        var area = safeArea();
         var isCard = AREA_ENTITY.some(function (item) {
           return area.indexOf(item.prefix) === 0;
         });
         if (isCard) {
           renderCardWidget();
         }
+        // Наблюдатель дешёвый и сам проверяет, что мы в разделе Задачи;
+        // запускаем всегда — переходы в амо происходят без перезагрузки страницы
+        setupTodoMenuObserver();
         return true;
       },
 
@@ -900,6 +969,11 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       destroy: function () {
         $(document).off('click.ypTT');
         $('.yp-tt-toast').remove();
+        $('.yp-tt-menu-item').remove();
+        if (todoMenuObserver) {
+          todoMenuObserver.disconnect();
+          todoMenuObserver = null;
+        }
       },
 
       contacts: {
