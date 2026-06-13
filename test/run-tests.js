@@ -199,11 +199,11 @@ require(path.join(__dirname, '..', 'widget', 'script.js'));
 const ruLang = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'widget', 'i18n', 'ru.json'), 'utf8'));
 const enLang = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'widget', 'i18n', 'en.json'), 'utf8'));
 
-let lastWidget = null;
+let allWidgets = [];
 
 function makeWidget(templates, area) {
   const widget = new CustomWidget();
-  lastWidget = widget;
+  allWidgets.push(widget);
   widget.langs = ruLang;
   widget.get_settings = () => ({ templates: JSON.stringify(templates) });
   widget.system = () => ({ area: area || 'lcard-1' });
@@ -216,11 +216,11 @@ function makeWidget(templates, area) {
 }
 
 function resetEnv() {
-  // отключаем наблюдатели предыдущего инстанса, чтобы тесты не пересекались
-  if (lastWidget) {
-    lastWidget.callbacks.destroy();
-    lastWidget = null;
-  }
+  // уничтожаем ВСЕ созданные инстансы (снимаем observer'ы, capture-listener'ы
+  // и интервалы), чтобы тесты не пересекались
+  allWidgets.splice(0).forEach((w) => {
+    try { w.callbacks.destroy(); } catch (e) { /* уже уничтожен */ }
+  });
   ajaxCalls = [];
   ajaxOverrides = [];
   fakeCatalog = null;
@@ -773,6 +773,35 @@ section('Покрытие ключей локализации (ru/en)');
   document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   assert(m17.destroyed, 'окно закрылось по Esc');
   w17.callbacks.destroy();
+
+  /* 18. Периодический ре-инжект восстанавливает пункт после перерисовки amoCRM */
+  section('Ре-инжект после перерисовки переключателя');
+  resetEnv();
+  const w18 = makeWidget([TPL_TOMORROW], 'lcard-1');
+  w18.callbacks.render();
+  w18.callbacks.bind_actions();
+  const $menu18 = $(
+    '<div class="js-tip-items">' +
+      '<div class="js-switcher-note">Примечание</div>' +
+      '<div class="js-switcher-task">Задача</div>' +
+    '</div>'
+  ).appendTo(document.body);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert($menu18.find('.yp-tt-compose-item').length === 1, 'пункт вставлен при появлении меню');
+  // эмулируем перерисовку amoCRM БЕЗ каких-либо событий: просто стираем пункт.
+  // observer/click не сработают — восстановить должен только интервал.
+  $menu18.find('.yp-tt-compose-item').remove();
+  assert($menu18.find('.yp-tt-compose-item').length === 0, 'пункт убран (эмуляция wipe)');
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  assert($menu18.find('.yp-tt-compose-item').length === 1,
+    'периодический ре-инжект восстановил пункт без событий');
+  w18.callbacks.destroy();
+  // после destroy таймер снят — повторного восстановления нет
+  $menu18.find('.yp-tt-compose-item').remove();
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  assert($menu18.find('.yp-tt-compose-item').length === 0,
+    'после destroy интервал остановлен — пункт не возвращается');
+  $menu18.remove();
 
   console.log('\nИтого: ' + passed + ' проверок пройдено, ' + failures + ' провалено');
   process.exit(failures ? 1 : 0);

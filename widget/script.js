@@ -55,6 +55,8 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     var todoMenuObserver = null;
     // Троттлинг инжекта пунктов меню (наблюдатель + клик)
     var injectScheduled = false;
+    // Периодический ре-инжект (amoCRM перерисовывает переключатель)
+    var composeReinjectTimer = null;
 
     /* ------------------------------ локализация ------------------------------ */
 
@@ -1198,7 +1200,8 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     // Детект переключателя типа сообщения (Чат / E-mail / Примечание / Задача).
     // Быстрый путь — по стабильным классам amoCRM (.js-tip-items / js-switcher-task);
     // фолбэк — текстовый скан по меткам пунктов (другие аккаунты/локали).
-    function tryInjectComposeMenuItem() {
+    // fastOnly: только быстрый путь без тяжёлого $('*') (для периодического вызова).
+    function tryInjectComposeMenuItem(fastOnly) {
       if (!isCardArea()) {
         return;
       }
@@ -1224,10 +1227,10 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
           injectedFast = true;
         }
       });
-      if (injectedFast) {
+      if (injectedFast || fastOnly) {
         return;
       }
-      // фолбэк: текстовый скан
+      // фолбэк: текстовый скан (только в событийных вызовах, не в интервале)
       $('*').filter(function () {
         return isLeafWithLabel(this, COMPOSE_TASK_LABELS);
       }).each(function () {
@@ -1274,6 +1277,12 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         attributeFilter: ['class', 'style', 'hidden']
       });
       document.addEventListener('click', composeClickTrigger, true);
+      // Гарантированная вставка: amoCRM перерисовывает переключатель и стирает
+      // наш пункт, событийные триггеры это не всегда догоняют. Лёгкий быстрый
+      // путь по класс-селектору (без $('*')), идемпотентен — дёшево.
+      composeReinjectTimer = setInterval(function () {
+        tryInjectComposeMenuItem(true);
+      }, 500);
       runInjections();
     }
 
@@ -1420,6 +1429,10 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         $('.yp-tt-toast').remove();
         $('.yp-tt-menu-item').remove();
         $('.yp-tt-compose-item').remove();
+        if (composeReinjectTimer) {
+          clearInterval(composeReinjectTimer);
+          composeReinjectTimer = null;
+        }
         if (todoMenuObserver) {
           todoMenuObserver.disconnect();
           todoMenuObserver = null;
