@@ -50,6 +50,8 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
 
     // Наблюдатель за появлением меню «...» в разделе Задачи
     var todoMenuObserver = null;
+    // Троттлинг инжекта пунктов меню (наблюдатель + клик)
+    var injectScheduled = false;
 
     /* ------------------------------ локализация ------------------------------ */
 
@@ -1090,31 +1092,82 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     // Добавляем «Шаблоны задач» в выпадающий переключатель типа сообщения
     // в нижней части карточки (Чат / E-mail / Примечание / Задача).
     // Пункт клонируется с «Задачи», чтобы стиль всегда совпадал с нативным.
+    // Нормализованный текст пункта меню
+    function menuItemText($el) {
+      return $el.text().replace(/\s+/g, ' ').trim();
+    }
+
+    // Элемент-«лист» с заданным текстом: текст лежит непосредственно в нём,
+    // а не унаследован от единственного потомка-обёртки. Так мы находим
+    // именно строку меню «Задача», а не родительский контейнер.
+    function isLeafWithLabel(el, labels) {
+      // дешёвый пред-фильтр: пункт меню — компактный элемент;
+      // не считаем .text() на крупных поддеревьях (карточка целиком)
+      if (el.getElementsByTagName('*').length > 20) {
+        return false;
+      }
+      var $el = $(el);
+      if (labels.indexOf(menuItemText($el)) === -1) {
+        return false;
+      }
+      // ни один дочерний элемент не содержит этот же полный текст —
+      // значит текст принадлежит самому элементу (возможно + иконка)
+      var ownsText = true;
+      $el.children().each(function () {
+        if (labels.indexOf(menuItemText($(this))) !== -1) {
+          ownsText = false;
+        }
+      });
+      return ownsText;
+    }
+
+    // По элементу «Задача» поднимаемся вверх в поисках контейнера меню:
+    // его прямые дети содержат пункт «Примечание», а сам пункт «Задача» —
+    // потомок одного из этих детей. Возвращаем { menu, proto }.
+    function findComposeMenu($task) {
+      var node = $task.get(0);
+      for (var level = 0; level < 5 && node; level++) {
+        var $container = $(node);
+        var $children = $container.children();
+        if ($children.length >= 2 && $children.length <= 8) {
+          var hasNote = false;
+          var $proto = null;
+          $children.each(function () {
+            if (COMPOSE_NOTE_LABELS.indexOf(menuItemText($(this))) !== -1) {
+              hasNote = true;
+            }
+            // прототип — ребёнок-контейнер, внутри которого лежит «Задача»
+            if (this === $task.get(0) || $.contains(this, $task.get(0))) {
+              $proto = $(this);
+            }
+          });
+          if (hasNote && $proto && $proto.length) {
+            return { menu: $container, proto: $proto };
+          }
+        }
+        node = node.parentNode;
+      }
+      return null;
+    }
+
+    // Детект меню по текстам пунктов, а не по CSS-классам: вёрстка
+    // переключателя (Чат / E-mail / Примечание / Задача) у разных аккаунтов
+    // отличается классами, но метки стабильны.
     function tryInjectComposeMenuItem() {
       if (!isCardArea()) {
         return;
       }
-      $('[class*="switcher"]').each(function () {
-        var $menu = $(this);
-        if ($menu.find('.yp-tt-compose-item').length) {
+      $('*').filter(function () {
+        return isLeafWithLabel(this, COMPOSE_TASK_LABELS);
+      }).each(function () {
+        var found = findComposeMenu($(this));
+        if (!found) {
           return;
         }
-        var $children = $menu.children();
-        if ($children.length < 2 || $children.length > 8) {
-          return;
-        }
-        var $proto = null;
-        var hasNote = false;
-        $children.each(function () {
-          var text = $(this).text().replace(/\s+/g, ' ').trim();
-          if (COMPOSE_TASK_LABELS.indexOf(text) !== -1) {
-            $proto = $(this);
-          }
-          if (COMPOSE_NOTE_LABELS.indexOf(text) !== -1) {
-            hasNote = true;
-          }
-        });
-        if (!$proto || !hasNote) {
+        var $menu = found.menu;
+        var $proto = found.proto;
+        // защита от дублей и от наших собственных модалок
+        if ($menu.find('.yp-tt-compose-item').length || $menu.closest('.yp-tt-modal').length) {
           return;
         }
         var $item = $proto.clone(false).addClass('yp-tt-compose-item');
@@ -1131,24 +1184,26 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       });
     }
 
+    function runInjections() {
+      injectScheduled = false;
+      tryInjectTodoMenuItem();
+      tryInjectComposeMenuItem();
+    }
+
+    // Лёгкий троттлинг: мутации в карточке происходят постоянно
+    function scheduleInjections() {
+      if (!injectScheduled) {
+        injectScheduled = true;
+        setTimeout(runInjections, 150);
+      }
+    }
+
     function setupTodoMenuObserver() {
       if (todoMenuObserver || !window.MutationObserver) {
         return;
       }
       injectStyles();
-      var scheduled = false;
-      var runInjections = function () {
-        scheduled = false;
-        tryInjectTodoMenuItem();
-        tryInjectComposeMenuItem();
-      };
-      todoMenuObserver = new window.MutationObserver(function () {
-        // лёгкий троттлинг: мутации в карточке происходят постоянно
-        if (!scheduled) {
-          scheduled = true;
-          setTimeout(runInjections, 150);
-        }
-      });
+      todoMenuObserver = new window.MutationObserver(scheduleInjections);
       todoMenuObserver.observe(document.body, { childList: true, subtree: true });
       runInjections();
     }
@@ -1274,6 +1329,11 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
           })
           .on('click.ypTT', '.yp-tt__editor-open', function () {
             openEditorModal(persistWithToast);
+          })
+          // Переключатель типа сообщения может раскрываться без мутаций DOM —
+          // дотягиваемся инжектом после любого клика в карточке
+          .on('click.ypTT', function () {
+            scheduleInjections();
           });
         return true;
       },

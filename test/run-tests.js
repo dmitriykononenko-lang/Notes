@@ -662,6 +662,51 @@ section('Покрытие ключей локализации (ru/en)');
   cardWidget.callbacks.destroy();
   $switcher.remove();
 
+  /* 13. Меню без «говорящих» классов (как на живом аккаунте) */
+  section('Переключатель без CSS-классов switcher');
+  resetEnv();
+  const w13 = makeWidget([TPL_TOMORROW], 'lcard-1');
+  w13.callbacks.render();
+  w13.callbacks.bind_actions();
+  // вёрстка без классов вида switcher/compose — детект только по текстам
+  const $menu13 = $(
+    '<div class="tips"><ul>' +
+      '<li>Чат</li>' +
+      '<li>E-mail</li>' +
+      '<li>Примечание</li>' +
+      '<li><span class="icon"></span>Задача</li>' +
+    '</ul></div>'
+  ).appendTo(document.body);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const $added13 = $menu13.find('.yp-tt-compose-item');
+  assert($added13.length === 1, 'пункт добавлен в меню без «говорящих» классов');
+  assert($added13.text().trim() === ruLang.widget.name, 'текст пункта — название виджета');
+  assert($added13.prev().text().trim() === 'Задача', 'пункт стоит сразу после «Задачи»');
+  $added13.trigger('click');
+  assert(lastModal() && lastModal().$body.find('.yp-tt-picker__card').length === 1,
+    'клик открывает окно выбора шаблона');
+  w13.callbacks.destroy();
+  $menu13.remove();
+
+  /* 14. Триггер по клику: меню отрисовано заранее, без мутаций DOM */
+  section('Инжект по клику в карточке');
+  resetEnv();
+  const w14 = makeWidget([TPL_TOMORROW], 'lcard-1');
+  w14.callbacks.render();
+  w14.callbacks.bind_actions();
+  // меню уже в DOM ДО запуска наблюдателя/инжекта
+  const $menu14 = $(
+    '<div class="dd"><div>Чат</div><div>E-mail</div><div>Примечание</div><div>Задача</div></div>'
+  ).appendTo(document.body);
+  // дать пройти первичному runInjections из bind_actions-наблюдателя
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  // эмулируем, что меню «раскрылось» по клику пользователя
+  $(document).trigger('click');
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert($menu14.find('.yp-tt-compose-item').length === 1, 'клик по документу дотягивает инжект пункта');
+  w14.callbacks.destroy();
+  $menu14.remove();
+
   console.log('\nИтого: ' + passed + ' проверок пройдено, ' + failures + ' провалено');
   process.exit(failures ? 1 : 0);
 })();
