@@ -23,6 +23,9 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     var self = this;
 
     var STYLE_ID = 'yp-tt-styles';
+    // Метка сборки — видна в data-v элемента стилей, нужна для диагностики,
+    // что в браузере загружена актуальная версия скрипта
+    var WIDGET_BUILD = '2026-06-13.2';
 
     // Сопоставление области карточки (system().area) с типом сущности API v4
     var AREA_ENTITY = [
@@ -635,6 +638,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       ].join('');
       var styleEl = document.createElement('style');
       styleEl.id = STYLE_ID;
+      styleEl.setAttribute('data-v', WIDGET_BUILD);
       styleEl.textContent = css;
       document.head.appendChild(styleEl);
     }
