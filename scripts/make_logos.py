@@ -12,9 +12,10 @@ WHITE = (255, 255, 255, 255)
 FONT_PATH = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 
 SIZES = {
-    # logo.png — полноширинный баннер в шапке блока правой панели (как Zoom):
-    # широкое соотношение → ветка `wide` (иконка + вордмарка, full-bleed)
-    "logo.png": (348, 72),
+    # logo.png — строго 130x100 по требованию валидатора amoCRM (full-bleed
+    # красный + иконка чек-листа). Полноширинный баннер рисуется в теле
+    # виджета через CSS (.yp-tt__banner), а не логотипом.
+    "logo.png": (130, 100),
     "logo_min.png": (84, 84),
     "logo_small.png": (108, 108),
     "logo_medium.png": (240, 84),
