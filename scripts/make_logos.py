@@ -12,7 +12,9 @@ WHITE = (255, 255, 255, 255)
 FONT_PATH = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 
 SIZES = {
-    "logo.png": (130, 100),
+    # logo.png — полноширинный баннер в шапке блока правой панели (как Zoom):
+    # широкое соотношение → ветка `wide` (иконка + вордмарка, full-bleed)
+    "logo.png": (348, 72),
     "logo_min.png": (84, 84),
     "logo_small.png": (108, 108),
     "logo_medium.png": (240, 84),
