@@ -25,7 +25,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     var STYLE_ID = 'yp-tt-styles';
     // Метка сборки — видна в data-v элемента стилей, нужна для диагностики,
     // что в браузере загружена актуальная версия скрипта
-    var WIDGET_BUILD = '2026-06-13.5';
+    var WIDGET_BUILD = '2026-06-13.6';
 
     // Сопоставление области карточки (system().area) с типом сущности API v4
     var AREA_ENTITY = [
@@ -589,7 +589,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         '.yp-tt{padding:4px 0}',
         /* полноширинный баннер в шапке блока (как Zoom/Radist): отрицательные */
         /* поля компенсируют паддинг тела виджета — полоса идёт во всю ширину */
-        '.yp-tt__banner{display:flex;align-items:center;justify-content:center;gap:8px;margin:-16px -16px 12px;padding:12px 14px;background:#e60e0e;color:#fff;font-weight:bold;font-size:15px;letter-spacing:2px}',
+        '.yp-tt__banner{display:flex;align-items:center;justify-content:center;gap:8px;margin:0 -16px 12px;padding:12px 14px;background:#e60e0e;color:#fff;font-weight:bold;font-size:15px;letter-spacing:2px}',
         '.yp-tt__banner svg{display:block;flex-shrink:0}',
         '.yp-tt__open{display:block;width:100%;box-sizing:border-box;padding:8px 10px;border:none;border-radius:3px;background:#4c8bf7;color:#fff;font-size:13px;cursor:pointer;text-align:center}',
         '.yp-tt__open:hover{background:#3f7be0}',
