@@ -667,6 +667,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       injectStyles();
       // init вызывается синхронно из конструктора Modal, поэтому экземпляр
       // окна берём из this, а не из ещё не присвоенной переменной
+      var escHandler = null;
       return new Modal({
         class_name: 'yp-tt-modal-holder',
         init: function ($modal_body) {
@@ -677,11 +678,23 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
             .html(html)
             .trigger('modal:loaded')
             .trigger('modal:centrify');
+          // закрытие по Esc
+          escHandler = function (event) {
+            if (event.key === 'Escape' || event.keyCode === 27) {
+              closeYpModal(modalInstance);
+            }
+          };
+          document.addEventListener('keydown', escHandler);
           if (onReady) {
             onReady($modal_body, modalInstance);
           }
         },
-        destroy: function () {}
+        destroy: function () {
+          if (escHandler) {
+            document.removeEventListener('keydown', escHandler);
+            escHandler = null;
+          }
+        }
       });
     }
 
@@ -1122,15 +1135,18 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     }
 
     // По элементу «Задача» поднимаемся вверх в поисках контейнера меню:
-    // его прямые дети содержат пункт «Примечание», а сам пункт «Задача» —
-    // потомок одного из этих детей. Возвращаем { menu, proto }.
+    // его прямые дети содержат пункты «Примечание» и «Задача». Реальное меню
+    // amoCRM содержит много типов (appointment, sms, …), часть скрыта классом
+    // hidden — поэтому верхнюю границу детей держим свободной.
+    // Возвращаем { menu, proto }.
     function findComposeMenu($task) {
       var node = $task.get(0);
       for (var level = 0; level < 5 && node; level++) {
         var $container = $(node);
         var $children = $container.children();
-        if ($children.length >= 2 && $children.length <= 8) {
+        if ($children.length >= 2 && $children.length <= 20) {
           var hasNote = false;
+          var hasTask = false;
           var $proto = null;
           $children.each(function () {
             if (COMPOSE_NOTE_LABELS.indexOf(menuItemText($(this))) !== -1) {
@@ -1139,9 +1155,10 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
             // прототип — ребёнок-контейнер, внутри которого лежит «Задача»
             if (this === $task.get(0) || $.contains(this, $task.get(0))) {
               $proto = $(this);
+              hasTask = true;
             }
           });
-          if (hasNote && $proto && $proto.length) {
+          if (hasNote && hasTask && $proto && $proto.length) {
             return { menu: $container, proto: $proto };
           }
         }
@@ -1150,37 +1167,70 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       return null;
     }
 
-    // Детект меню по текстам пунктов, а не по CSS-классам: вёрстка
-    // переключателя (Чат / E-mail / Примечание / Задача) у разных аккаунтов
-    // отличается классами, но метки стабильны.
+    // Вставка пункта «Шаблоны задач» после прототипа «Задача».
+    // Идемпотентно: повторно не дублирует, не лезет в наши модалки.
+    function injectComposeItem($menu, $proto) {
+      if (!$menu.length || !$proto.length) {
+        return;
+      }
+      if ($menu.find('.yp-tt-compose-item').length || $menu.closest('.yp-tt-modal').length) {
+        return;
+      }
+      var $item = $proto.clone(false).addClass('yp-tt-compose-item');
+      stripDataAttributes($item);
+      $item.find('svg, img, [class*="check"]').remove();
+      // снимаем класс «выбранного» пункта, если он был на прототипе
+      $item.removeClass('tips-item_selected');
+      replaceTextContent($item, t('widget.name', 'Шаблоны задач'));
+      $item.on('click', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        $menu.hide();
+        openPickerModal();
+      });
+      $proto.after($item);
+    }
+
+    // Детект переключателя типа сообщения (Чат / E-mail / Примечание / Задача).
+    // Быстрый путь — по стабильным классам amoCRM (.js-tip-items / js-switcher-task);
+    // фолбэк — текстовый скан по меткам пунктов (другие аккаунты/локали).
     function tryInjectComposeMenuItem() {
       if (!isCardArea()) {
         return;
       }
+      // быстрый путь: известная вёрстка amoCRM
+      var injectedFast = false;
+      $('.js-tip-items, .tips__inner').each(function () {
+        var $menu = $(this);
+        var $proto = $menu.children('.js-switcher-task').first();
+        if (!$proto.length) {
+          // запасной поиск прототипа по тексту среди прямых детей
+          $menu.children().each(function () {
+            if (!$proto.length && COMPOSE_TASK_LABELS.indexOf(menuItemText($(this))) !== -1) {
+              $proto = $(this);
+            }
+          });
+        }
+        var hasNote = $menu.children('.js-switcher-note').length > 0 ||
+          $menu.children().filter(function () {
+            return COMPOSE_NOTE_LABELS.indexOf(menuItemText($(this))) !== -1;
+          }).length > 0;
+        if ($proto.length && hasNote) {
+          injectComposeItem($menu, $proto);
+          injectedFast = true;
+        }
+      });
+      if (injectedFast) {
+        return;
+      }
+      // фолбэк: текстовый скан
       $('*').filter(function () {
         return isLeafWithLabel(this, COMPOSE_TASK_LABELS);
       }).each(function () {
         var found = findComposeMenu($(this));
-        if (!found) {
-          return;
+        if (found) {
+          injectComposeItem(found.menu, found.proto);
         }
-        var $menu = found.menu;
-        var $proto = found.proto;
-        // защита от дублей и от наших собственных модалок
-        if ($menu.find('.yp-tt-compose-item').length || $menu.closest('.yp-tt-modal').length) {
-          return;
-        }
-        var $item = $proto.clone(false).addClass('yp-tt-compose-item');
-        stripDataAttributes($item);
-        $item.find('svg, img, [class*="check"]').remove();
-        replaceTextContent($item, t('widget.name', 'Шаблоны задач'));
-        $item.on('click', function (event) {
-          event.preventDefault();
-          event.stopPropagation();
-          $menu.hide();
-          openPickerModal();
-        });
-        $proto.after($item);
       });
     }
 
@@ -1198,13 +1248,28 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       }
     }
 
+    // Переключатель раскрывается переключением класса/видимости и часто
+    // отдаёт клик с stopPropagation — поэтому при клике по документу в фазе
+    // перехвата запускаем серию попыток (рендер/анимация не мгновенны).
+    function composeClickTrigger() {
+      scheduleInjections();
+      setTimeout(runInjections, 200);
+      setTimeout(runInjections, 450);
+    }
+
     function setupTodoMenuObserver() {
       if (todoMenuObserver || !window.MutationObserver) {
         return;
       }
       injectStyles();
       todoMenuObserver = new window.MutationObserver(scheduleInjections);
-      todoMenuObserver.observe(document.body, { childList: true, subtree: true });
+      todoMenuObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'hidden']
+      });
+      document.addEventListener('click', composeClickTrigger, true);
       runInjections();
     }
 
@@ -1322,6 +1387,9 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       bind_actions: function () {
         // Делегированные обработчики переживают перерисовки карточки,
         // неймспейс защищает от дублей при повторных вызовах bind_actions
+        // Инжект пункта в переключатель дотягивается capture-слушателем
+        // (composeClickTrigger), навешанным в setupTodoMenuObserver —
+        // он переживает stopPropagation amoCRM.
         $(document)
           .off('click.ypTT')
           .on('click.ypTT', '.yp-tt__open', function () {
@@ -1329,11 +1397,6 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
           })
           .on('click.ypTT', '.yp-tt__editor-open', function () {
             openEditorModal(persistWithToast);
-          })
-          // Переключатель типа сообщения может раскрываться без мутаций DOM —
-          // дотягиваемся инжектом после любого клика в карточке
-          .on('click.ypTT', function () {
-            scheduleInjections();
           });
         return true;
       },
@@ -1349,6 +1412,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
 
       destroy: function () {
         $(document).off('click.ypTT');
+        document.removeEventListener('click', composeClickTrigger, true);
         $('.yp-tt-toast').remove();
         $('.yp-tt-menu-item').remove();
         $('.yp-tt-compose-item').remove();

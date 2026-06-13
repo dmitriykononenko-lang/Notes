@@ -707,6 +707,73 @@ section('Покрытие ключей локализации (ru/en)');
   w14.callbacks.destroy();
   $menu14.remove();
 
+  /* 15. Реальная вёрстка amoCRM (tips__inner / js-tip-items, скрытые пункты) */
+  section('Реальная вёрстка переключателя amoCRM');
+  resetEnv();
+  const w15 = makeWidget([TPL_TOMORROW], 'lcard-1');
+  w15.callbacks.render();
+  w15.callbacks.bind_actions();
+  const $menu15 = $(
+    '<div class="tips__inner custom-scroll js-tip-items">' +
+      '<div class="tips-item js-tips-item js-switcher-chat tips-item_selected" data-id="chat">Чат</div>' +
+      '<div class="tips-item js-tips-item js-switcher-email hidden" data-id="email">E-mail</div>' +
+      '<div class="tips-item js-tips-item js-switcher-note" data-id="note">Примечание</div>' +
+      '<div class="tips-item js-tips-item js-switcher-task" data-id="task">Задача</div>' +
+      '<div class="tips-item js-tips-item js-switcher-appointment hidden" data-id="appointment">Запись</div>' +
+      '<div class="tips-item js-tips-item js-switcher-sms hidden" data-id="sms">SMS</div>' +
+    '</div>'
+  ).appendTo(document.body);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const $added15 = $menu15.find('.yp-tt-compose-item');
+  assert($added15.length === 1, 'пункт вставлен в реальную вёрстку amoCRM');
+  assert($added15.attr('data-id') === undefined, 'data-id у клона удалён');
+  assert($added15.prev().hasClass('js-switcher-task'), 'пункт стоит сразу после «Задачи»');
+  assert(!$added15.hasClass('tips-item_selected'), 'класс выбранного пункта снят с клона');
+  assert($added15.text().trim() === ruLang.widget.name, 'текст пункта — название виджета');
+  $added15.trigger('click');
+  assert(lastModal() && lastModal().$body.find('.yp-tt-picker__card').length === 1,
+    'клик по пункту открывает окно выбора шаблона');
+  w15.callbacks.destroy();
+  $menu15.remove();
+
+  /* 16. Capture-клик переживает stopPropagation и восстанавливает пункт */
+  section('Capture-клик при stopPropagation');
+  resetEnv();
+  const w16 = makeWidget([TPL_TOMORROW], 'lcard-1');
+  w16.callbacks.render();
+  w16.callbacks.bind_actions();
+  const $menu16 = $(
+    '<div class="js-tip-items">' +
+      '<div class="js-switcher-note">Примечание</div>' +
+      '<div class="js-switcher-task">Задача</div>' +
+    '</div>'
+  ).appendTo(document.body);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert($menu16.find('.yp-tt-compose-item').length === 1, 'пункт вставлен при появлении меню');
+  // эмулируем перерисовку amoCRM: наш пункт стёрт, на меню висит bubble-stopPropagation
+  $menu16.find('.yp-tt-compose-item').remove();
+  $menu16.get(0).addEventListener('click', function (e) { e.stopPropagation(); }, false);
+  // нативный клик в фазе перехвата (jQuery.trigger не доходит до capture)
+  $menu16.get(0).dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 550));
+  assert($menu16.find('.yp-tt-compose-item').length === 1,
+    'capture-клик восстановил пункт несмотря на stopPropagation');
+  w16.callbacks.destroy();
+  $menu16.remove();
+
+  /* 17. Закрытие модального окна по Esc */
+  section('Закрытие модалки по Esc');
+  resetEnv();
+  const w17 = makeWidget([TPL_TOMORROW], 'lcard-1');
+  w17.callbacks.render();
+  w17.callbacks.bind_actions();
+  $('#card-zone .yp-tt__open').trigger('click');
+  const m17 = lastModal();
+  assert(m17 && !m17.destroyed, 'окно выбора открыто');
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert(m17.destroyed, 'окно закрылось по Esc');
+  w17.callbacks.destroy();
+
   console.log('\nИтого: ' + passed + ' проверок пройдено, ' + failures + ' провалено');
   process.exit(failures ? 1 : 0);
 })();
