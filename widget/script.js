@@ -25,7 +25,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     var STYLE_ID = 'yp-tt-styles';
     // Метка сборки — видна в data-v элемента стилей, нужна для диагностики,
     // что в браузере загружена актуальная версия скрипта
-    var WIDGET_BUILD = '2026-06-13.6';
+    var WIDGET_BUILD = '2026-06-13.7';
 
     // Сопоставление области карточки (system().area) с типом сущности API v4
     var AREA_ENTITY = [
@@ -587,10 +587,9 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       var css = [
         /* блок в карточке */
         '.yp-tt{padding:4px 0}',
-        /* полноширинный баннер в шапке блока (как Zoom/Radist): отрицательные */
-        /* поля компенсируют паддинг тела виджета — полоса идёт во всю ширину */
-        '.yp-tt__banner{display:flex;align-items:center;justify-content:center;gap:8px;margin:0 -16px 12px;padding:12px 14px;background:#e60e0e;color:#fff;font-weight:bold;font-size:15px;letter-spacing:2px}',
-        '.yp-tt__banner svg{display:block;flex-shrink:0}',
+        /* плашка секции, перекрашенная в фирменный баннер (как KZM) */
+        '.yp-tt-branded-caption{background:#e60e0e !important}',
+        '.yp-tt-branded-caption,.yp-tt-branded-caption *{color:#fff !important}',
         '.yp-tt__open{display:block;width:100%;box-sizing:border-box;padding:8px 10px;border:none;border-radius:3px;background:#4c8bf7;color:#fff;font-size:13px;cursor:pointer;text-align:center}',
         '.yp-tt__open:hover{background:#3f7be0}',
         '.yp-tt__editor-open{display:inline-block;margin-top:8px;font-size:12px;color:#92989b;cursor:pointer;border-bottom:1px dashed #c4c8cb}',
@@ -1249,6 +1248,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       injectScheduled = false;
       tryInjectTodoMenuItem();
       tryInjectComposeMenuItem();
+      brandSectionCaption();
     }
 
     // Лёгкий троттлинг: мутации в карточке происходят постоянно
@@ -1286,16 +1286,50 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       // путь по класс-селектору (без $('*')), идемпотентен — дёшево.
       composeReinjectTimer = setInterval(function () {
         tryInjectComposeMenuItem(true);
+        brandSectionCaption();
       }, 500);
       runInjections();
     }
 
     /* ---------------------------- блок в карточке ---------------------------- */
 
+    // Находим плашку (caption) секции виджета в правой панели относительно
+    // нашего тела .yp-tt: поднимаемся вверх, ищем заголовок-сосед перед нашей
+    // веткой (короткий текст = название виджета). Не зависим от классов amoCRM.
+    function findSectionCaption(body) {
+      var node = body;
+      for (var i = 0; i < 8 && node && node.parentNode; i++) {
+        var parent = node.parentNode;
+        var caption = parent.firstElementChild;
+        if (caption && caption !== node && !caption.contains(body)) {
+          var txt = (caption.textContent || '').replace(/\s+/g, ' ').trim();
+          if (txt && txt.length <= 40) {
+            return caption;
+          }
+        }
+        node = parent;
+      }
+      return null;
+    }
+
+    // Перекрашиваем плашку секции в фирменный баннер (как у KZM).
+    function brandSectionCaption() {
+      if (!isCardArea()) {
+        return;
+      }
+      var body = document.querySelector('.yp-tt');
+      if (!body) {
+        return;
+      }
+      var caption = findSectionCaption(body);
+      if (caption && caption.classList && !caption.classList.contains('yp-tt-branded-caption')) {
+        caption.classList.add('yp-tt-branded-caption');
+      }
+    }
+
     function renderCardWidget() {
       injectStyles();
       var html = '<div class="yp-tt">' +
-        '<div class="yp-tt__banner">' + MENU_ICON_SVG + '<span>KO:AGENCY</span></div>' +
         '<button type="button" class="yp-tt__open">' + escapeHtml(t('card.open', 'Поставить задачу по шаблону')) + '</button>' +
         '<span class="yp-tt__editor-open">' + escapeHtml(t('card.editor', 'Редактор шаблонов')) + '</span>' +
         '</div>';
@@ -1305,6 +1339,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         body: html,
         render: ''
       });
+      brandSectionCaption();
     }
 
     /* ------------------------- редактор в настройках ------------------------- */

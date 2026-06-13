@@ -208,9 +208,12 @@ function makeWidget(templates, area) {
   widget.get_settings = () => ({ templates: JSON.stringify(templates) });
   widget.system = () => ({ area: area || 'lcard-1' });
   widget.params = { widget_code: 'task_templates' };
+  // эмулируем секцию правой панели amoCRM: плашка (caption) + тело
   widget.render_template = (opts) => {
     $('#card-zone').remove();
-    $('<div id="card-zone"></div>').html(opts.body).appendTo(document.body);
+    $('<div id="card-zone"><div class="amo-caption">KO:AGENCY</div>' +
+      '<div class="amo-body"></div></div>').appendTo(document.body);
+    $('#card-zone .amo-body').html(opts.body);
   };
   return widget;
 }
@@ -272,7 +275,9 @@ section('Рендер блока в карточке');
   assert($('#card-zone .yp-tt__open').length === 1, 'есть кнопка «Поставить задачу по шаблону»');
   assert($('#card-zone .yp-tt__editor-open').length === 1, 'есть ссылка «Редактор шаблонов»');
   assert($('#card-zone .yp-tt__open').text() === ruLang.card.open, 'текст кнопки из локализации');
-  assert($('#card-zone .yp-tt__banner').length === 1, 'есть полноширинный баннер KO:AGENCY');
+  assert($('#card-zone .yp-tt__banner').length === 0, 'отдельного баннера в теле нет (дубль убран)');
+  assert($('#card-zone .amo-caption').hasClass('yp-tt-branded-caption'),
+    'плашка секции перекрашена в фирменный баннер (как KZM)');
 }
 
 /* 2. Окно выбора шаблона и постановка задачи по пресету */
