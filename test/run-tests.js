@@ -275,9 +275,7 @@ section('Рендер блока в карточке');
   assert($('#card-zone .yp-tt__open').length === 1, 'есть кнопка «Поставить задачу по шаблону»');
   assert($('#card-zone .yp-tt__editor-open').length === 1, 'есть ссылка «Редактор шаблонов»');
   assert($('#card-zone .yp-tt__open').text() === ruLang.card.open, 'текст кнопки из локализации');
-  assert($('#card-zone .yp-tt__banner').length === 0, 'отдельного баннера в теле нет (дубль убран)');
-  assert($('#card-zone .amo-caption').hasClass('yp-tt-branded-caption'),
-    'плашка секции перекрашена в фирменный баннер (как KZM)');
+  assert($('#card-zone .yp-tt__banner').length === 1, 'есть полноширинный баннер KO:AGENCY');
 }
 
 /* 2. Окно выбора шаблона и постановка задачи по пресету */
