@@ -33,3 +33,32 @@
 - «Перезвонить клиенту» — звонок текущему менеджеру через час.
 - «Получить оплату» — задача ответственному за сделку через 2 дня до конца дня.
 - «Встреча с клиентом» — встреча с выбором даты вручную.
+
+---
+
+## English listing
+
+### Name
+Task Templates
+
+### Short description (~100 chars)
+Create tasks in one click from predefined templates — right from a lead, contact or company card.
+
+### Full description
+Task Templates removes the routine of creating repetitive tasks in amoCRM.
+
+Set up your templates once and create tasks in one click:
+
+- **A template defines everything**: comment, task type (call, meeting and any
+  type configured in your account), deadline and assignee.
+- **Flexible deadlines**: at creation, in 15/30 minutes, in an hour, by end of
+  day, tomorrow, in 2–3 days, in a week — or pick the date manually.
+- **Assignee**: current user, the card owner, or a specific employee.
+- **Clear picker**: before creating, you see exactly what the task will be —
+  deadline, assignee, type and comment.
+- **Simple editor**: create, edit and delete templates without a developer —
+  from the card or the widget settings.
+
+Works on lead, contact and company cards. No external server required — data is
+stored inside your amoCRM.
+
