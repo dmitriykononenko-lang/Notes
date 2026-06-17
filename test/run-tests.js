@@ -40,6 +40,14 @@ global.AMOCRM = {
         ]
       };
     }
+    // кастомные типы лежат в отдельной константе task_types (как в живом amoCRM)
+    if (key === 'task_types') {
+      return {
+        1: { id: 1, option: 'Связаться с клиентом' },
+        2: { id: 2, option: 'Встреча' },
+        3: { id: 3, option: 'Получить оплату' }
+      };
+    }
     if (key === 'managers') {
       return {
         101: { id: 101, title: 'Viktor Borisenko', active: true },
@@ -409,6 +417,10 @@ section('Редактор шаблонов (модальное окно)');
   const form = lastModal();
   assert(form.$body.find('[name="tpl_name"]').length === 1, 'открылась форма «Создать шаблон»');
   assert(form.$body.find('[name="tpl_deadline"] option').length === 9, 'в селекте срока 9 пресетов');
+  assert(form.$body.find('[name="tpl_type"] option').length === 3,
+    'в селекте типа все типы аккаунта, включая кастомные');
+  assert(form.$body.find('[name="tpl_type"] option[value="3"]').length === 1,
+    'кастомный тип задачи (id 3) есть в списке');
   assert(form.$body.find('[name="tpl_responsible"] option[value="303"]').length === 0,
     'неактивный сотрудник не предлагается в ответственных');
 

@@ -25,7 +25,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     var STYLE_ID = 'yp-tt-styles';
     // Метка сборки — видна в data-v элемента стилей, нужна для диагностики,
     // что в браузере загружена актуальная версия скрипта
-    var WIDGET_BUILD = '2026-06-16.11';
+    var WIDGET_BUILD = '2026-06-16.12';
 
     // Сопоставление области карточки (system().area) с типом сущности API v4
     var AREA_ENTITY = [
@@ -106,26 +106,52 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       return readSettingsTemplates();
     }
 
+    // Типы задач: собираем из всех источников amoCRM и объединяем по id —
+    // так подхватываются и кастомные типы аккаунта, а не только Звонок/Встреча.
     function getTaskTypes() {
-      var list = [];
-      try {
-        var types = (AMOCRM.constant('account') || {}).task_types || {};
+      var byId = {};
+
+      function ingest(types) {
+        if (!types) {
+          return;
+        }
         if (Array.isArray(types)) {
           types.forEach(function (type) {
-            if (type && type.id) {
-              list.push({ id: parseInt(type.id, 10), name: type.option || type.name || ('#' + type.id) });
+            if (!type) {
+              return;
+            }
+            var id = parseInt(type.id, 10);
+            if (id) {
+              byId[id] = type.option || type.name || type.name_lc || ('#' + id);
             }
           });
-        } else {
+        } else if (typeof types === 'object') {
           Object.keys(types).forEach(function (key) {
-            var type = types[key] || {};
-            var id = parseInt(type.id || key, 10);
+            var type = types[key];
+            if (typeof type === 'string') {
+              var sid = parseInt(key, 10);
+              if (sid) {
+                byId[sid] = type;
+              }
+              return;
+            }
+            type = type || {};
+            var id = parseInt(type.id != null ? type.id : key, 10);
             if (id) {
-              list.push({ id: id, name: type.option || type.name || ('#' + id) });
+              byId[id] = type.option || type.name || type.name_lc || ('#' + id);
             }
           });
         }
-      } catch (e) { /* подставим стандартные типы ниже */ }
+      }
+
+      try { ingest(AMOCRM.constant('task_types')); } catch (e) { /* нет константы */ }
+      try { ingest((AMOCRM.constant('account') || {}).task_types); } catch (e) { /* нет в account */ }
+
+      var list = Object.keys(byId).map(function (id) {
+        return { id: parseInt(id, 10), name: byId[id] };
+      });
+      list.sort(function (a, b) { return a.id - b.id; });
+
       if (!list.length) {
         list = [
           { id: 1, name: t('editor.default_types.call', 'Звонок') },
