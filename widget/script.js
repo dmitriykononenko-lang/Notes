@@ -25,7 +25,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     var STYLE_ID = 'yp-tt-styles';
     // Метка сборки — видна в data-v элемента стилей, нужна для диагностики,
     // что в браузере загружена актуальная версия скрипта
-    var WIDGET_BUILD = '2026-06-16.13';
+    var WIDGET_BUILD = '2026-06-16.14';
 
     // Сопоставление области карточки (system().area) с типом сущности API v4
     var AREA_ENTITY = [
@@ -58,16 +58,17 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     // Периодический ре-инжект (amoCRM перерисовывает переключатель)
     var composeReinjectTimer = null;
 
-    // Внедрение в нативный UI amoCRM выключено по умолчанию (модерация
-    // amoМаркета не приветствует модификацию родного интерфейса вне
-    // официальных локаций). Включается параметром yp_native_ui.
-    var NATIVE_UI_DEFAULT = false;
+    // Внедрение в нативный UI amoCRM (пункт в переключателе, пункт в меню
+    // Задач). Включено по умолчанию. Для moderation-safe сборки можно
+    // принудительно выключить параметром yp_native_ui: false.
+    var NATIVE_UI_DEFAULT = true;
     function nativeUiEnabled() {
       try {
-        return NATIVE_UI_DEFAULT || !!(self.params && self.params.yp_native_ui);
-      } catch (e) {
-        return NATIVE_UI_DEFAULT;
-      }
+        if (self.params && self.params.yp_native_ui === false) {
+          return false;
+        }
+      } catch (e) { /* нет params */ }
+      return NATIVE_UI_DEFAULT;
     }
 
     /* ------------------------------ локализация ------------------------------ */

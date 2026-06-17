@@ -215,9 +215,11 @@ function makeWidget(templates, area, nativeUi) {
   widget.langs = ruLang;
   widget.get_settings = () => ({ templates: JSON.stringify(templates) });
   widget.system = () => ({ area: area || 'lcard-1' });
-  // По умолчанию включаем нативные инъекции в тестах (покрытие кода);
-  // в публичной сборке они выключены (yp_native_ui отсутствует в params).
-  widget.params = { widget_code: 'task_templates', yp_native_ui: nativeUi !== false };
+  // Нативные инъекции включены по умолчанию; форс-выключение — nativeUi===false.
+  widget.params = { widget_code: 'task_templates' };
+  if (nativeUi === false) {
+    widget.params.yp_native_ui = false;
+  }
   // эмулируем секцию правой панели amoCRM: плашка (caption) + тело.
   // amoCRM вешает на плашку класс из opts.caption.class_name — повторяем это.
   widget.render_template = (opts) => {
