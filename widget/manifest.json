@@ -3,13 +3,13 @@
     "name": "widget.name",
     "description": "widget.description",
     "short_description": "widget.short_description",
-    "version": "1.0.9",
+    "version": "1.1.0",
     "interface_version": 2,
     "init_once": false,
     "locale": ["ru", "en"],
     "installation": true,
     "support": {
-      "link": "https://github.com/dmitriykononenko-lang/Notes",
+      "link": "https://t.me/ko_agency",
       "email": "partnerskoda@gmail.com"
     }
   },
