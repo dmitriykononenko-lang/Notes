@@ -209,13 +209,15 @@ const enLang = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'widget', '
 
 let allWidgets = [];
 
-function makeWidget(templates, area) {
+function makeWidget(templates, area, nativeUi) {
   const widget = new CustomWidget();
   allWidgets.push(widget);
   widget.langs = ruLang;
   widget.get_settings = () => ({ templates: JSON.stringify(templates) });
   widget.system = () => ({ area: area || 'lcard-1' });
-  widget.params = { widget_code: 'task_templates' };
+  // По умолчанию включаем нативные инъекции в тестах (покрытие кода);
+  // в публичной сборке они выключены (yp_native_ui отсутствует в params).
+  widget.params = { widget_code: 'task_templates', yp_native_ui: nativeUi !== false };
   // эмулируем секцию правой панели amoCRM: плашка (caption) + тело.
   // amoCRM вешает на плашку класс из opts.caption.class_name — повторяем это.
   widget.render_template = (opts) => {
@@ -822,6 +824,28 @@ section('Покрытие ключей локализации (ru/en)');
   assert($menu18.find('.yp-tt-compose-item').length === 0,
     'после destroy интервал остановлен — пункт не возвращается');
   $menu18.remove();
+
+  /* 19. Публичная сборка (yp_native_ui выключен): нет инъекций в нативный UI */
+  section('Moderation-safe: нативные инъекции выключены');
+  resetEnv();
+  const w19 = makeWidget([TPL_TOMORROW], 'lcard-1', false); // как в проде
+  w19.callbacks.render();
+  w19.callbacks.bind_actions();
+  // блок в карточке (официальная локация) и красная плашка — должны быть
+  assert($('#card-zone .yp-tt__open').length === 1, 'официальный блок в карточке на месте');
+  assert($('#card-zone .amo-caption').hasClass('yp-tt-card'), 'красная плашка (caption-класс) на месте');
+  // меню переключателя есть в DOM, но пункт НЕ внедряется
+  const $menu19 = $(
+    '<div class="js-tip-items">' +
+      '<div class="js-switcher-note">Примечание</div>' +
+      '<div class="js-switcher-task">Задача</div>' +
+    '</div>'
+  ).appendTo(document.body);
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  assert($menu19.find('.yp-tt-compose-item').length === 0,
+    'в публичной сборке пункт в переключатель не внедряется');
+  w19.callbacks.destroy();
+  $menu19.remove();
 
   console.log('\nИтого: ' + passed + ' проверок пройдено, ' + failures + ' провалено');
   process.exit(failures ? 1 : 0);

@@ -25,7 +25,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     var STYLE_ID = 'yp-tt-styles';
     // Метка сборки — видна в data-v элемента стилей, нужна для диагностики,
     // что в браузере загружена актуальная версия скрипта
-    var WIDGET_BUILD = '2026-06-16.12';
+    var WIDGET_BUILD = '2026-06-16.13';
 
     // Сопоставление области карточки (system().area) с типом сущности API v4
     var AREA_ENTITY = [
@@ -57,6 +57,18 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     var injectScheduled = false;
     // Периодический ре-инжект (amoCRM перерисовывает переключатель)
     var composeReinjectTimer = null;
+
+    // Внедрение в нативный UI amoCRM выключено по умолчанию (модерация
+    // amoМаркета не приветствует модификацию родного интерфейса вне
+    // официальных локаций). Включается параметром yp_native_ui.
+    var NATIVE_UI_DEFAULT = false;
+    function nativeUiEnabled() {
+      try {
+        return NATIVE_UI_DEFAULT || !!(self.params && self.params.yp_native_ui);
+      } catch (e) {
+        return NATIVE_UI_DEFAULT;
+      }
+    }
 
     /* ------------------------------ локализация ------------------------------ */
 
@@ -1417,9 +1429,12 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         if (isCard) {
           renderCardWidget();
         }
-        // Наблюдатель дешёвый и сам проверяет, что мы в разделе Задачи;
-        // запускаем всегда — переходы в амо происходят без перезагрузки страницы
-        setupTodoMenuObserver();
+        // Внедрение в нативный UI amoCRM (пункт в переключателе/меню Задач,
+        // глобальный observer) выключено в публичной сборке для прохождения
+        // модерации. Включается флагом yp_native_ui (см. nativeUiEnabled).
+        if (nativeUiEnabled()) {
+          setupTodoMenuObserver();
+        }
         return true;
       },
 
