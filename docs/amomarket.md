@@ -28,8 +28,8 @@
 Работает в карточках сделок, контактов и компаний. Не требует стороннего сервера —
 данные хранятся в вашем amoCRM.
 
-**Поддержка:** тел. [УКАЗАТЬ ТЕЛЕФОН], e-mail koagency.me@gmail.com,
-Telegram https://t.me/ko_agency (KO:AGENCY, ИП Кононенко Е.В.).
+**Поддержка:** тел. 78143, e-mail koagency.me@gmail.com,
+Telegram https://t.me/koagency_bot, Max https://max.ru/id463300749910_bot (KO:AGENCY, ИП Кононенко Е.В.).
 
 ## Сценарии использования
 
@@ -65,6 +65,6 @@ Set up your templates once and create tasks in one click:
 Works on lead, contact and company cards. No external server required — data is
 stored inside your amoCRM.
 
-**Support:** phone [PHONE], e-mail koagency.me@gmail.com,
-Telegram https://t.me/ko_agency (KO:AGENCY).
+**Support:** phone 78143, e-mail koagency.me@gmail.com,
+Telegram https://t.me/koagency_bot, Max https://max.ru/id463300749910_bot (KO:AGENCY).
 

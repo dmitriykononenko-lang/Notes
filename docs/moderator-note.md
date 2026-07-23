@@ -27,4 +27,4 @@
 `settings` (редактор шаблонов в настройках).
 
 ## Поддержка
-Telegram https://t.me/ko_agency, e-mail koagency.me@gmail.com.
+Telegram https://t.me/koagency_bot, Max https://max.ru/id463300749910_bot, e-mail koagency.me@gmail.com.

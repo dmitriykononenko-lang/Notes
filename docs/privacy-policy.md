@@ -4,7 +4,7 @@ _Разместите этот текст по публичному URL и ук�
 amoМаркета._
 
 **Разработчик:** ИП Кононенко Елена Витальевна (KO:AGENCY)
-**Контакт:** Telegram https://t.me/ko_agency, e-mail koagency.me@gmail.com
+**Контакт:** Telegram https://t.me/koagency_bot, Max https://max.ru/id463300749910_bot, e-mail koagency.me@gmail.com
 **Дата редакции:** 16.06.2026
 
 ## 1. Общие положения
@@ -47,5 +47,5 @@ amoМаркета._
 
 ## 7. Контакты
 
-По вопросам обработки данных: Telegram https://t.me/ko_agency,
+По вопросам обработки данных: Telegram https://t.me/koagency_bot, Max https://max.ru/id463300749910_bot,
 e-mail koagency.me@gmail.com.

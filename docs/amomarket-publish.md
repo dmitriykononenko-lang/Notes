@@ -15,7 +15,7 @@
 - ✅ Нет `eval`, внешних `<script>`, сторонних доменов.
 - ✅ Логотипы: `logo.png` 130×100 (требование валидатора), полный набор
   `images/`.
-- ✅ Автотесты: `node test/run-tests.js` — 174 проверки зелёные.
+- ✅ Автотесты: `node test/run-tests.js` — 179 проверок зелёные.
 
 ## 1a. Нативные входы (флаг `yp_native_ui`)
 
@@ -35,7 +35,7 @@
 
 ## 2. Что поправить/проверить перед сабмитом
 
-- ✅ **support.link** в `manifest.json` = https://t.me/ko_agency (Telegram
+- ✅ **support.link** в `manifest.json` = https://t.me/koagency_bot (Telegram-бот поддержки; Max: https://max.ru/id463300749910_bot) (
   поддержки KO:AGENCY).
 - 🟡 **Версия** при каждом обновлении в маркете — поднимать `version` в
   манифесте (иначе amoCRM кэширует старые файлы; уже наступали на это).
@@ -95,6 +95,6 @@
 ## 7. Перед каждым релизом (короткий ритуал)
 
 - `node test/run-tests.js` — зелёный.
-- Поднять `version` в `manifest.json` и `WIDGET_BUILD` в `script.js`.
-- Пересобрать zip, проверить на тестовом аккаунте (data-v совпадает),
+- Поднять `version` в `manifest.json`.
+- Пересобрать zip, проверить на тестовом аккаунте,
   затем сабмит.

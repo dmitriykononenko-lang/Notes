@@ -4,7 +4,7 @@ _Разместите по публичному URL и укажите ссылк
 Перед публикацией проверьте у юриста._
 
 **Исполнитель:** ИП Кононенко Елена Витальевна (KO:AGENCY)
-**Контакт:** Telegram https://t.me/ko_agency, e-mail koagency.me@gmail.com
+**Контакт:** Telegram https://t.me/koagency_bot, Max https://max.ru/id463300749910_bot, e-mail koagency.me@gmail.com
 **Дата редакции:** 16.06.2026
 
 ## 1. Предмет
@@ -30,7 +30,7 @@ _Разместите по публичному URL и укажите ссылк
   противоправно.
 
 ## 5. Поддержка
-Поддержка оказывается через Telegram https://t.me/ko_agency и e-mail
+Поддержка оказывается через Telegram https://t.me/koagency_bot, Max https://max.ru/id463300749910_bot и e-mail
 koagency.me@gmail.com в рабочие дни.
 
 ## 6. Ответственность
