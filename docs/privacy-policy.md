@@ -1,10 +1,7 @@
 # Политика конфиденциальности виджета «Шаблоны задач»
 
-_Разместите этот текст по публичному URL и укажите ссылку в форме интеграции
-amoМаркета._
-
 **Разработчик:** ИП Кононенко Елена Витальевна (KO:AGENCY)
-**Контакт:** Telegram https://t.me/koagency_bot, Max https://max.ru/id463300749910_bot, e-mail koagency.me@gmail.com
+**Контакты:** Telegram https://t.me/koagency_bot · Max https://max.ru/id463300749910_bot · e-mail koagency.me@gmail.com
 **Дата редакции:** 16.06.2026
 
 ## 1. Общие положения
