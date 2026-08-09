@@ -59,16 +59,32 @@ if manifest:
     locale = w.get("locale", [])
     if "ru" not in locale or "en" not in locale:
         warn("locale = %s (ожидались ru и en)" % locale)
+    if w.get("interface_version") != 2:
+        warn("interface_version = %s (спека: 2)" % w.get("interface_version"))
+    # installation по спеке — строка "y"/"n", не булево
+    inst = w.get("installation")
+    if inst not in ("y", "n"):
+        err("installation = %r, по спеке должно быть \"y\" или \"n\"" % inst)
+    # маркетплейс-поля (для публичной публикации)
+    for mf in ("free", "category"):
+        if mf not in manifest:
+            warn("нет маркетплейс-поля '%s' (нужно для публичного виджета)" % mf)
+    if "countries" not in manifest:
+        warn("нет 'countries' (нужно для публичного виджета)")
 
 
 # --- логотипы ---------------------------------------------------------------
-# Требуемые размеры (logo.png проверен валидатором amoCRM = 130x100).
+# 5 обязательных логотипов с точными размерами (официальная спека) +
+# logo_dp 174x109 (только для Digital Pipeline). Каждый ≤ 300 КБ.
 REQUIRED_LOGOS = {
+    "logo_min.png": (84, 84),
+    "logo_medium.png": (240, 84),
     "logo.png": (130, 100),
-    "logo_small.png": (108, 108),
     "logo_main.png": (400, 272),
+    "logo_small.png": (108, 108),
 }
-OPTIONAL_LOGOS = ("logo_min.png", "logo_medium.png", "logo_dp.png")
+OPTIONAL_LOGOS = {"logo_dp.png": (174, 109)}
+MAX_LOGO_BYTES = 300 * 1024
 
 try:
     from PIL import Image
@@ -78,19 +94,26 @@ except Exception:
     warn("Pillow не установлен — размеры логотипов не проверены")
 
 images_dir = os.path.join(WIDGET, "images")
-for name, size in REQUIRED_LOGOS.items():
+
+
+def check_logo(name, size, required):
     path = os.path.join(images_dir, name)
     if not os.path.isfile(path):
-        err("нет логотипа images/%s" % name)
-        continue
+        (err if required else warn)("нет логотипа images/%s" % name)
+        return
+    if os.path.getsize(path) > MAX_LOGO_BYTES:
+        err("images/%s больше 300 КБ" % name)
     if have_pil:
         got = Image.open(path).size
         if got != size:
             err("images/%s размер %sx%s, требуется %sx%s"
                 % (name, got[0], got[1], size[0], size[1]))
-for name in OPTIONAL_LOGOS:
-    if not os.path.isfile(os.path.join(images_dir, name)):
-        warn("нет логотипа images/%s (опционально)" % name)
+
+
+for name, size in REQUIRED_LOGOS.items():
+    check_logo(name, size, required=True)
+for name, size in OPTIONAL_LOGOS.items():
+    check_logo(name, size, required=False)
 
 
 # --- script.js: отсутствие console.* ----------------------------------------
