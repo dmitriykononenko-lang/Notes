@@ -61,10 +61,13 @@ if manifest:
         warn("locale = %s (ожидались ru и en)" % locale)
     if w.get("interface_version") != 2:
         warn("interface_version = %s (спека: 2)" % w.get("interface_version"))
-    # installation по спеке — строка "y"/"n", не булево
+    # installation — БУЛЕВО. Проверено на кабинете приватной интеграции
+    # (koagency, 16.09.2026): на "y" кабинет отвечает
+    # «"installation" field must be TRUE or FALSE only».
     inst = w.get("installation")
-    if inst not in ("y", "n"):
-        err("installation = %r, по спеке должно быть \"y\" или \"n\"" % inst)
+    if not isinstance(inst, bool):
+        err("installation = %r, кабинет принимает только true/false "
+            "(строка \"y\"/\"n\" отклоняется)" % inst)
     # ВАЖНО (verified amocrm-widget skill, 2026-09): поля free/countries/
     # category/code/secret_key НЕ должны быть в manifest.json — кабинет
     # отклоняет публичный виджет с «Unknown field(s)». Они задаются в форме

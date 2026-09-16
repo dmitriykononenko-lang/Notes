@@ -7,7 +7,7 @@
     "interface_version": 2,
     "init_once": false,
     "locale": ["ru", "en"],
-    "installation": "y",
+    "installation": true,
     "support": {
       "link": "https://t.me/koagency_bot",
       "email": "koagency.me@gmail.com"
