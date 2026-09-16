@@ -65,12 +65,14 @@ if manifest:
     inst = w.get("installation")
     if inst not in ("y", "n"):
         err("installation = %r, по спеке должно быть \"y\" или \"n\"" % inst)
-    # маркетплейс-поля (для публичной публикации)
-    for mf in ("free", "category"):
-        if mf not in manifest:
-            warn("нет маркетплейс-поля '%s' (нужно для публичного виджета)" % mf)
-    if "countries" not in manifest:
-        warn("нет 'countries' (нужно для публичного виджета)")
+    # ВАЖНО (verified amocrm-widget skill, 2026-09): поля free/countries/
+    # category/code/secret_key НЕ должны быть в manifest.json — кабинет
+    # отклоняет публичный виджет с «Unknown field(s)». Они задаются в форме
+    # кабинета, а не в манифесте.
+    for banned in ("free", "countries", "category", "code", "secret_key"):
+        if banned in manifest or banned in w:
+            err("поле '%s' в manifest.json запрещено — задаётся в форме "
+                "кабинета (иначе «Unknown field(s)»)" % banned)
 
 
 # --- логотипы ---------------------------------------------------------------
@@ -129,6 +131,18 @@ else:
         err("в script.js остался отладочный вывод console.* (%d)" % n_console)
     if "debugger" in script_src:
         err("в script.js остался debugger")
+    # Публичный статический валидатор amoМаркета банит глобаль AMOCRM.*,
+    # а также confirm(/alert(. Для ПРИВАТНОЙ загрузки они разрешены, поэтому
+    # это предупреждение, а не ошибка: показывает, что как есть виджет
+    # проходит только как приватный.
+    n_amocrm = len(re.findall(r"\bAMOCRM\.", script_src))
+    n_confirm = len(re.findall(r"\bconfirm\(", script_src))
+    n_alert = len(re.findall(r"\balert\(", script_src))
+    if n_amocrm or n_confirm or n_alert:
+        warn("script.js использует AMOCRM.* (%d), confirm( (%d), alert( (%d) "
+             "— для ПУБЛИЧНОГО маркетплейса это запрещено; приватная "
+             "загрузка допускает. Публичный путь требует бэкенд-bootstrap."
+             % (n_amocrm, n_confirm, n_alert))
 
 
 # --- i18n-паритет ru/en -----------------------------------------------------
