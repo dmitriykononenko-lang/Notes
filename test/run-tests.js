@@ -27,38 +27,22 @@ const $ = jqueryModule.fn ? jqueryModule : jqueryModule(dom.window);
 
 /* ----------------------------- заглушки amoCRM ----------------------------- */
 
-global.AMOCRM = {
-  constant(key) {
-    if (key === 'user') {
-      return { id: 101, name: 'Viktor Borisenko' };
-    }
-    if (key === 'account') {
-      return {
-        task_types: [
-          { id: 1, option: 'Связаться с клиентом' },
-          { id: 2, option: 'Встреча' }
-        ]
-      };
-    }
-    // кастомные типы лежат в отдельной константе task_types (как в живом amoCRM)
-    if (key === 'task_types') {
-      return {
-        1: { id: 1, option: 'Связаться с клиентом' },
-        2: { id: 2, option: 'Встреча' },
-        3: { id: 3, option: 'Получить оплату' }
-      };
-    }
-    if (key === 'managers') {
-      return {
-        101: { id: 101, title: 'Viktor Borisenko', active: true },
-        202: { id: 202, title: 'Алексей Савченко', active: true },
-        303: { id: 303, title: 'Уволенный Сотрудник', active: false }
-      };
-    }
-    return {};
-  },
-  data: { current_card: { id: 123 } }
+// Глобального AMOCRM в тестах НЕТ: виджет обязан работать без него
+// (статический валидатор публичного amoМаркета банит эту глобаль).
+// Данные аккаунта эмулируются REST-маршрутами ниже.
+const fakeAccount = {
+  task_types: [
+    { id: 1, name: 'Связаться с клиентом' },
+    { id: 2, name: 'Встреча' },
+    { id: 3, name: 'Получить оплату' }
+  ]
 };
+const fakeUsers = [
+  { id: 101, name: 'Viktor Borisenko', rights: { is_active: true } },
+  { id: 202, name: 'Алексей Савченко', rights: { is_active: true } },
+  { id: 303, name: 'Уволенный Сотрудник', rights: { is_active: false } }
+];
+
 
 const modals = [];
 class ModalStub {
@@ -92,6 +76,12 @@ const STORAGE_NAME = 'Шаблоны задач (данные виджета)';
 function routerHandler(call) {
   const method = (call.method || 'GET').toUpperCase();
   const url = call.url;
+  if (url.startsWith('/api/v4/account') && method === 'GET') {
+    return { ok: true, data: fakeAccount };
+  }
+  if (url.startsWith('/api/v4/users') && method === 'GET') {
+    return { ok: true, data: { _embedded: { users: fakeUsers } } };
+  }
   if (url.startsWith('/api/v4/catalogs?') && method === 'GET') {
     return {
       ok: true,
@@ -214,7 +204,7 @@ function makeWidget(templates, area, nativeUi) {
   allWidgets.push(widget);
   widget.langs = ruLang;
   widget.get_settings = () => ({ templates: JSON.stringify(templates) });
-  widget.system = () => ({ area: area || 'lcard-1' });
+  widget.system = () => ({ area: area || 'lcard-1', amouser_id: 101 });
   // Нативные инъекции включены по умолчанию; форс-выключение — nativeUi===false.
   widget.params = { widget_code: 'task_templates' };
   if (nativeUi === false) {

@@ -116,6 +116,65 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
       return readSettingsTemplates();
     }
 
+    // Данные аккаунта (типы задач, пользователи, текущий пользователь) —
+    // только через REST same-origin (/api/v4) и self.system(): без глобальных
+    // объектов страницы, чтобы сборка проходила статический валидатор amoМаркета.
+    var amoData = { taskTypes: null, users: null, loading: null };
+
+    function currentUserId() {
+      try {
+        return parseInt((self.system() || {}).amouser_id, 10) || null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function loadAmoData(cb) {
+      if (amoData.loading) {
+        if (cb) { amoData.loading.push(cb); }
+        return;
+      }
+      var waiters = amoData.loading = cb ? [cb] : [];
+      var pending = 2;
+      function settle() {
+        pending -= 1;
+        if (pending > 0) {
+          return;
+        }
+        amoData.loading = null;
+        waiters.slice().forEach(function (fn) { fn(); });
+      }
+      $.ajax({ url: '/api/v4/account?with=task_types', method: 'GET', dataType: 'json' })
+        .done(function (response) {
+          amoData.taskTypes = (response && response.task_types) ||
+            (response && response._embedded && response._embedded.task_types) || [];
+          settle();
+        })
+        .fail(function () {
+          amoData.taskTypes = amoData.taskTypes || [];
+          settle();
+        });
+      $.ajax({ url: '/api/v4/users?limit=250', method: 'GET', dataType: 'json' })
+        .done(function (response) {
+          amoData.users = (response && response._embedded && response._embedded.users) || [];
+          settle();
+        })
+        .fail(function () {
+          amoData.users = amoData.users || [];
+          settle();
+        });
+    }
+
+    // Вызывает cb, когда данные аккаунта загружены (или загрузка не удалась —
+    // тогда работают значения по умолчанию).
+    function ensureAmoData(cb) {
+      if (amoData.taskTypes !== null && amoData.users !== null) {
+        cb();
+        return;
+      }
+      loadAmoData(cb);
+    }
+
     // Типы задач: собираем из всех источников amoCRM и объединяем по id —
     // так подхватываются и кастомные типы аккаунта, а не только Звонок/Встреча.
     function getTaskTypes() {
@@ -154,8 +213,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         }
       }
 
-      try { ingest(AMOCRM.constant('task_types')); } catch (e) { /* нет константы */ }
-      try { ingest((AMOCRM.constant('account') || {}).task_types); } catch (e) { /* нет в account */ }
+      ingest(amoData.taskTypes);
 
       var list = Object.keys(byId).map(function (id) {
         return { id: parseInt(id, 10), name: byId[id] };
@@ -183,29 +241,29 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
 
     function getManagers() {
       var list = [];
-      try {
-        var managers = AMOCRM.constant('managers') || {};
-        Object.keys(managers).forEach(function (key) {
-          var manager = managers[key] || {};
-          if (manager.active === false) {
-            return;
-          }
-          var id = parseInt(manager.id || key, 10);
-          if (id) {
-            list.push({ id: id, name: manager.title || manager.name || ('#' + id) });
-          }
-        });
-      } catch (e) { /* список останется пустым */ }
+      (amoData.users || []).forEach(function (user) {
+        user = user || {};
+        var rights = user.rights || {};
+        if (rights.is_active === false || user.active === false) {
+          return;
+        }
+        var id = parseInt(user.id, 10);
+        if (id) {
+          list.push({ id: id, name: user.name || user.title || ('#' + id) });
+        }
+      });
       return list;
     }
 
     function getCurrentUser() {
-      try {
-        var user = AMOCRM.constant('user') || {};
-        return { id: parseInt(user.id, 10) || null, name: user.name || '' };
-      } catch (e) {
-        return { id: null, name: '' };
-      }
+      var id = currentUserId();
+      var name = '';
+      (amoData.users || []).forEach(function (user) {
+        if (user && parseInt(user.id, 10) === id) {
+          name = user.name || '';
+        }
+      });
+      return { id: id, name: name };
     }
 
     // Определяем сущность и id открытой карточки
@@ -223,10 +281,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
         }
       }
 
-      var id = null;
-      try {
-        id = parseInt((AMOCRM.data.current_card || {}).id, 10) || null;
-      } catch (e) { /* возьмём id из URL */ }
+      var id = null; // id карточки берём из URL
 
       var match = window.location.pathname.match(/\/(leads|contacts|companies)\/detail\/(\d+)/);
       if (match) {
@@ -776,8 +831,10 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     }
 
     function openPickerModal() {
-      loadTemplates(function (templates) {
-        openPickerModalWith(templates);
+      ensureAmoData(function () {
+        loadTemplates(function (templates) {
+          openPickerModalWith(templates);
+        });
       });
     }
 
@@ -985,8 +1042,10 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     // переоткрытиями окна, чтобы введённое не терялось при ошибке сохранения.
     function openEditorModal(persist, templatesOverride) {
       if (!templatesOverride) {
-        loadTemplates(function (loaded) {
-          openEditorModal(persist, loaded);
+        ensureAmoData(function () {
+          loadTemplates(function (loaded) {
+            openEditorModal(persist, loaded);
+          });
         });
         return;
       }
@@ -1350,8 +1409,10 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
     // «Сохранить» (используется для миграции и при недоступности списков).
     function renderSettingsEditor($modal_body) {
       injectStyles();
-      loadTemplates(function (loaded) {
-        buildSettingsEditor($modal_body, loaded);
+      ensureAmoData(function () {
+        loadTemplates(function (loaded) {
+          buildSettingsEditor($modal_body, loaded);
+        });
       });
     }
 
@@ -1420,6 +1481,7 @@ define(['jquery', 'lib/components/base/modal'], function ($, Modal) {
 
     this.callbacks = {
       render: function () {
+        loadAmoData();
         var area = safeArea();
         var isCard = AREA_ENTITY.some(function (item) {
           return area.indexOf(item.prefix) === 0;
